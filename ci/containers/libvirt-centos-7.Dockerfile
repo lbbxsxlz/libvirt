@@ -43,6 +43,7 @@ WEiJKtQrZDJloqtyi/mmRa1VsV7RYR0VPJjhK/R8EQ7Ysshy\n\
         ca-certificates \
         ccache \
         chrony \
+        clang \
         cyrus-sasl-devel \
         dbus-devel \
         device-mapper-devel \
@@ -87,7 +88,6 @@ WEiJKtQrZDJloqtyi/mmRa1VsV7RYR0VPJjhK/R8EQ7Ysshy\n\
         lsof \
         lvm2 \
         make \
-        ncurses-devel \
         net-tools \
         netcf-devel \
         nfs-utils \
@@ -128,7 +128,7 @@ WEiJKtQrZDJloqtyi/mmRa1VsV7RYR0VPJjhK/R8EQ7Ysshy\n\
     ln -s /usr/bin/ccache /usr/libexec/ccache-wrappers/$(basename /usr/bin/gcc)
 
 RUN pip3 install \
-         meson==0.49.0
+         meson==0.54.0
 
 ENV LANG "en_US.UTF-8"
 

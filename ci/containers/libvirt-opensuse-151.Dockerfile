@@ -13,6 +13,7 @@ RUN zypper update -y && \
            ca-certificates \
            ccache \
            chrony \
+           clang \
            cppi \
            cyrus-sasl-devel \
            dbus-1-devel \
@@ -59,7 +60,6 @@ RUN zypper update -y && \
            lsof \
            lvm2 \
            make \
-           ncurses-devel \
            net-tools \
            nfs-utils \
            ninja \
@@ -100,7 +100,7 @@ RUN zypper update -y && \
     ln -s /usr/bin/ccache /usr/libexec/ccache-wrappers/$(basename /usr/bin/gcc)
 
 RUN pip3 install \
-         meson==0.49.0
+         meson==0.54.0
 
 ENV LANG "en_US.UTF-8"
 

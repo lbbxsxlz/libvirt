@@ -14,6 +14,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             ca-certificates \
             ccache \
             chrony \
+            clang \
             cpanminus \
             dnsmasq-base \
             dwarves \
@@ -33,7 +34,6 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             lsof \
             lvm2 \
             make \
-            meson \
             net-tools \
             nfs-common \
             ninja-build \
@@ -90,9 +90,9 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libglusterfs-dev:armel \
             libgnutls28-dev:armel \
             libiscsi-dev:armel \
-            libncurses-dev:armel \
             libnl-3-dev:armel \
             libnl-route-3-dev:armel \
+            libnuma-dev:armel \
             libparted-dev:armel \
             libpcap0.8-dev:armel \
             libpciaccess-dev:armel \
@@ -109,7 +109,22 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libyajl-dev:armel \
             xfslibs-dev:armel && \
     apt-get autoremove -y && \
-    apt-get autoclean -y
+    apt-get autoclean -y && \
+    mkdir -p /usr/local/share/meson/cross && \
+    echo "[binaries]\n\
+c = '/usr/bin/arm-linux-gnueabi-gcc'\n\
+ar = '/usr/bin/arm-linux-gnueabi-gcc-ar'\n\
+strip = '/usr/bin/arm-linux-gnueabi-strip'\n\
+pkgconfig = '/usr/bin/arm-linux-gnueabi-pkg-config'\n\
+\n\
+[host_machine]\n\
+system = 'linux'\n\
+cpu_family = 'arm'\n\
+cpu = 'arm'\n\
+endian = 'little'" > /usr/local/share/meson/cross/arm-linux-gnueabi
+
+RUN pip3 install \
+         meson==0.54.0
 
 ENV LANG "en_US.UTF-8"
 
@@ -121,3 +136,4 @@ ENV CCACHE_WRAPPERSDIR "/usr/libexec/ccache-wrappers"
 
 ENV ABI "arm-linux-gnueabi"
 ENV CONFIGURE_OPTS "--host=arm-linux-gnueabi"
+ENV MESON_OPTS "--cross-file=arm-linux-gnueabi"

@@ -14,6 +14,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             ca-certificates \
             ccache \
             chrony \
+            clang \
             cpanminus \
             dnsmasq-base \
             dwarves \
@@ -42,7 +43,6 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libglib2.0-dev \
             libgnutls28-dev \
             libiscsi-dev \
-            libncurses5-dev \
             libnetcf-dev \
             libnl-3-dev \
             libnl-route-3-dev \
@@ -108,7 +108,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     ln -s /usr/bin/ccache /usr/libexec/ccache-wrappers/$(basename /usr/bin/gcc)
 
 RUN pip3 install \
-         meson==0.49.0
+         meson==0.54.0
 
 ENV LANG "en_US.UTF-8"
 

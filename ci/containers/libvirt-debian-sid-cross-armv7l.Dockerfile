@@ -14,6 +14,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             ca-certificates \
             ccache \
             chrony \
+            clang \
             cpanminus \
             dnsmasq-base \
             dwarves \
@@ -90,9 +91,9 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libglusterfs-dev:armhf \
             libgnutls28-dev:armhf \
             libiscsi-dev:armhf \
-            libncurses-dev:armhf \
             libnl-3-dev:armhf \
             libnl-route-3-dev:armhf \
+            libnuma-dev:armhf \
             libparted-dev:armhf \
             libpcap0.8-dev:armhf \
             libpciaccess-dev:armhf \
@@ -110,7 +111,19 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libyajl-dev:armhf \
             xfslibs-dev:armhf && \
     apt-get autoremove -y && \
-    apt-get autoclean -y
+    apt-get autoclean -y && \
+    mkdir -p /usr/local/share/meson/cross && \
+    echo "[binaries]\n\
+c = '/usr/bin/arm-linux-gnueabihf-gcc'\n\
+ar = '/usr/bin/arm-linux-gnueabihf-gcc-ar'\n\
+strip = '/usr/bin/arm-linux-gnueabihf-strip'\n\
+pkgconfig = '/usr/bin/arm-linux-gnueabihf-pkg-config'\n\
+\n\
+[host_machine]\n\
+system = 'linux'\n\
+cpu_family = 'arm'\n\
+cpu = 'armhf'\n\
+endian = 'little'" > /usr/local/share/meson/cross/arm-linux-gnueabihf
 
 ENV LANG "en_US.UTF-8"
 
@@ -122,3 +135,4 @@ ENV CCACHE_WRAPPERSDIR "/usr/libexec/ccache-wrappers"
 
 ENV ABI "arm-linux-gnueabihf"
 ENV CONFIGURE_OPTS "--host=arm-linux-gnueabihf"
+ENV MESON_OPTS "--cross-file=arm-linux-gnueabihf"

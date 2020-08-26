@@ -8,7 +8,53 @@ the changes introduced by each of them.
 For a more fine-grained view, use the `git log`_.
 
 
-v6.6.0 (unreleased)
+v6.7.0 (unreleased)
+===================
+
+* **New features**
+
+  * qemu: Add support for initiator IQN configuration for iSCSI hostdevs
+
+    Similarly to iSCSI ``<disk>`` users can use an ``<initiator>`` element
+    inside ``<hostdev>`` with the same format to configure the ``IQN`` value
+    used by the qemu initiator when connecting to an iSCSI target.
+
+  * xen: Add support for device model command-line passthrough
+
+    Xen supports passing arbitrary arguments to the QEMU device model using
+    the ``device_model_args`` setting in xl.cfg(5). The libvirt xen driver now
+    supports this using ``<xen:commandline/>`` XML extensions.
+
+
+* **Improvements**
+
+  * Allow sparse streams for block devices
+
+    Sparse streams (e.g. ``virsh vol-download --sparse`` or ``virsh vol-upload
+    --sparse``) now handle if one of the stream ends is a block device.
+
+  * Remove NVDIMM auto-alignment for pSeries Guests
+
+    This feature was introduced in libvirt v6.2.0 as part of the overall
+    NVDIMM support for pSeries guests. The idea was to relieve the user
+    from knowing ppc64 alignment details, but the end result is that we
+    ended up with inconsistencies between domain XML and actual NVDIMM
+    size the guest is using. To promote consistency between domain XML
+    and the guest, unaligned NVDIMM sizes for pSeries guests will now be
+    forbidden and no size auto-alignment will be made. Instead, libvirt will
+    suggest an aligned round up size for the user.
+
+* **Bug fixes**
+
+  * virdevmapper: Deal with kernels without DM support
+
+    In the previous release libvirt dropped libdevmapper in favor of its own
+    implementation. However, it failed to deal correctly with kernels that
+    either don't have device mapper enabled or where the dm-mod module is not
+    loaded yet. This is now fixed.
+
+
+v6.6.0 (2020-08-02)
 ===================
 
 * **New features**
@@ -24,12 +70,37 @@ v6.6.0 (unreleased)
     MAC addresses that would generate a new one if they were in its OUI
     (00:0c:29).
 
+  * conf: add control over COW for storage pool directories
+
+    The storage pool code now attempts to disable COW by default on btrfs, but
+    management applications may wish to override this behaviour. This is now
+    possible via new ``cow`` element.
+
+
 * **Improvements**
 
   * esx: Change the NIC limit for recent virtualHW versions
 
     Specifying a virtualHW version greater or equal to 7 (ESXi 4.0) will allow
     you to use up to 10 NICs instead of 4 as it was previously.
+
+  * qemu: Support encrypted TLS keys for NBD disks
+
+    The secret key used for disks can now be encrypted similarly to TLS keys
+    used for migration, chardev and others.
+
+  * qemu: ``VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD`` can now be registered for ``<mirror>``
+
+    The event can now be used also for block copy destinations by using the
+    index of the ``<mirror>`` image.
+
+  * qemu: consider available CPUs in ``vcpupin/emulatorpin`` output
+
+    This patch changes the default bitmap of ``vcpupin`` and ``emulatorpin``,
+    in the case of domains with static vcpu placement, all available CPUs
+    instead of all possible CPUs are returned making these APIs consistent with
+    the behavior of ``vcpuinfo``.
+
 
 * **Bug fixes**
 
@@ -39,6 +110,34 @@ v6.6.0 (unreleased)
     consulted for getting full dependency tree of domain's disks. However, this
     meant that libdevmapper opened ``/dev/mapper/control`` which wasn't closed
     and was leaked to QEMU. CVE-2020-14339
+
+  * qemu: Report correct ``index`` in ``VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD``
+
+    Starting from libvirt 5.10 with QEMU 4.2 the
+    ``VIR_DOMAIN_EVENT_ID_BLOCK_THRESHOLD`` event would report incorrect device
+    ``index`` when reported for an image from the backing chain of a disk.
+
+  * qemu: Don't fail active layer block commit or block copy in certain cases
+
+    Starting from libvirt-6.5 an active layer block commit or a block copy could
+    fail if the same destination was used more than once.
+
+  * qemu: Don't change ownership of restore file
+
+    When restoring a domain from a file, Libvirt no longer changes its ownership.
+
+  * qemu: Set SPAPR TPM default to 2.0 and prevent 1.2 choice
+
+    The firmware (SLOF) on QEMU for ppc64 does not support TPM 1.2, so prevent
+    the choice of TPM 1.2 when the SPAPR device model is chosen and use a
+    default of '2.0' (TPM 2) for the backend.
+
+  * qemu: Do not set ``//cpu/@migratable`` for running domains
+
+    Libvirt release of 6.4.0 started to fill the default value for
+    ``//cpu/@migratable`` attribute according to QEMU support. However, active
+    domains either have the migratable attribute already set or they were
+    started with older Libvirt which doesn't support the attribute.
 
 
 v6.5.0 (2020-07-03)
