@@ -371,6 +371,18 @@ qemuValidateDomainDefClockTimers(const virDomainDef *def,
         case VIR_DOMAIN_TIMER_NAME_TSC:
         case VIR_DOMAIN_TIMER_NAME_KVMCLOCK:
         case VIR_DOMAIN_TIMER_NAME_HYPERVCLOCK:
+            if (!ARCH_IS_X86(def->os.arch) && timer->present == 1) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                               _("Configuring the '%s' timer is not supported "
+                                 "for virtType=%s arch=%s machine=%s guests"),
+                               virDomainTimerNameTypeToString(timer->name),
+                               virDomainVirtTypeToString(def->virtType),
+                               virArchToString(def->os.arch),
+                               def->os.machine);
+                return -1;
+            }
+            break;
+
         case VIR_DOMAIN_TIMER_NAME_LAST:
             break;
 
@@ -915,6 +927,9 @@ qemuValidateDomainDef(const virDomainDef *def,
             return -1;
         }
     }
+
+    if (qemuDomainDefValidateMemoryHotplug(def, qemuCaps, NULL) < 0)
+        return -1;
 
     if (qemuValidateDomainDefClockTimers(def, qemuCaps) < 0)
         return -1;
@@ -1637,10 +1652,9 @@ qemuValidateDomainWatchdogDef(const virDomainWatchdogDef *dev,
         break;
 
     case VIR_DOMAIN_WATCHDOG_MODEL_IB700:
-        if (dev->info.type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE &&
-            dev->info.type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA) {
+        if (dev->info.type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                           _("%s model of watchdog can go only on ISA bus"),
+                           _("%s model of watchdog does not support configuring the address"),
                            virDomainWatchdogModelTypeToString(dev->model));
             return -1;
         }
@@ -1832,6 +1846,13 @@ qemuValidateDomainDeviceDefHostdev(const virDomainHostdevDef *hostdev,
                                      "supported by this version of qemu"));
                     return -1;
                 }
+            }
+
+            if (hostdev->writeFiltering != VIR_TRISTATE_BOOL_ABSENT) {
+                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                               _("Write filtering of PCI device configuration "
+                                 "space is not supported by qemu"));
+                return -1;
             }
             break;
 

@@ -245,6 +245,7 @@ struct _virDomainHostdevSubsysSCSIHost {
     unsigned bus;
     unsigned target;
     unsigned long long unit;
+    virStorageSourcePtr src;
 };
 
 struct _virDomainHostdevSubsysSCSIiSCSI {
@@ -347,6 +348,7 @@ struct _virDomainHostdevDef {
     bool missing;
     bool readonly;
     bool shareable;
+    virTristateBool writeFiltering;
     union {
         virDomainHostdevSubsys subsys;
         virDomainHostdevCaps caps;

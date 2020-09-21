@@ -3012,23 +3012,16 @@ virDomainHostdevDefNew(void)
 
 
 static void
-virDomainHostdevSubsysSCSIiSCSIClear(virDomainHostdevSubsysSCSIiSCSIPtr iscsisrc)
-{
-    if (!iscsisrc)
-        return;
-
-    virObjectUnref(iscsisrc->src);
-    iscsisrc->src = NULL;
-}
-
-
-static void
 virDomainHostdevSubsysSCSIClear(virDomainHostdevSubsysSCSIPtr scsisrc)
 {
-    if (scsisrc->protocol == VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI)
-        virDomainHostdevSubsysSCSIiSCSIClear(&scsisrc->u.iscsi);
-    else
+    if (scsisrc->protocol == VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI) {
+        virObjectUnref(scsisrc->u.iscsi.src);
+        scsisrc->u.iscsi.src = NULL;
+    } else {
         VIR_FREE(scsisrc->u.host.adapter);
+        virObjectUnref(scsisrc->u.host.src);
+        scsisrc->u.host.src = NULL;
+    }
 }
 
 
@@ -8137,7 +8130,19 @@ virDomainHostdevSubsysPCIDefParseXML(xmlNodePtr node,
                                      virDomainHostdevDefPtr def,
                                      unsigned int flags)
 {
+    g_autofree char *filtering = NULL;
     xmlNodePtr cur;
+
+    if ((filtering = virXMLPropString(node, "writeFiltering"))) {
+        int val;
+        if ((val = virTristateBoolTypeFromString(filtering)) < 0) {
+            virReportError(VIR_ERR_XML_ERROR,
+                           _("unknown pci writeFiltering setting '%s'"),
+                           filtering);
+            return -1;
+        }
+        def->writeFiltering = val;
+    }
 
     cur = node->children;
     while (cur != NULL) {
@@ -8231,23 +8236,26 @@ virDomainStorageNetworkParseHost(xmlNodePtr hostnode,
 
 static int
 virDomainStorageNetworkParseHosts(xmlNodePtr node,
+                                  xmlXPathContextPtr ctxt,
                                   virStorageNetHostDefPtr *hosts,
                                   size_t *nhosts)
 {
-    xmlNodePtr child;
+    g_autofree xmlNodePtr *hostnodes = NULL;
+    ssize_t nhostnodes;
+    size_t i;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
 
-    for (child = node->children; child; child = child->next) {
-        if (child->type == XML_ELEMENT_NODE &&
-            virXMLNodeNameEqual(child, "host")) {
-            virStorageNetHostDef host;
+    ctxt->node = node;
 
-            if (virDomainStorageNetworkParseHost(child, &host) < 0)
-                return -1;
-            if (VIR_APPEND_ELEMENT(*hosts, *nhosts, host) < 0) {
-                virStorageNetHostDefClear(&host);
-                return -1;
-            }
-        }
+    if ((nhostnodes = virXPathNodeSet("./host", ctxt, &hostnodes)) <= 0)
+        return nhostnodes;
+
+    *hosts = g_new0(virStorageNetHostDef, nhostnodes);
+    *nhosts = nhostnodes;
+
+    for (i = 0; i < nhostnodes; i++) {
+        if (virDomainStorageNetworkParseHost(hostnodes[i], *hosts + i) < 0)
+            return -1;
     }
 
     return 0;
@@ -8256,88 +8264,72 @@ virDomainStorageNetworkParseHosts(xmlNodePtr node,
 
 static int
 virDomainHostdevSubsysSCSIHostDefParseXML(xmlNodePtr sourcenode,
-                                          virDomainHostdevSubsysSCSIPtr scsisrc)
+                                          xmlXPathContextPtr ctxt,
+                                          virDomainHostdevSubsysSCSIPtr scsisrc,
+                                          unsigned int flags,
+                                          virDomainXMLOptionPtr xmlopt)
 {
-    bool got_address = false, got_adapter = false;
-    xmlNodePtr cur;
     virDomainHostdevSubsysSCSIHostPtr scsihostsrc = &scsisrc->u.host;
     g_autofree char *bus = NULL;
     g_autofree char *target = NULL;
     g_autofree char *unit = NULL;
+    xmlNodePtr addressnode = NULL;
+    VIR_XPATH_NODE_AUTORESTORE(ctxt)
 
-    cur = sourcenode->children;
-    while (cur != NULL) {
-        if (cur->type == XML_ELEMENT_NODE) {
-            if (virXMLNodeNameEqual(cur, "address")) {
-                if (got_address) {
-                    virReportError(VIR_ERR_XML_ERROR, "%s",
-                                   _("more than one source addresses is "
-                                     "specified for scsi hostdev"));
-                    return -1;
-                }
+    ctxt->node = sourcenode;
 
-                if (!(bus = virXMLPropString(cur, "bus")) ||
-                    !(target = virXMLPropString(cur, "target")) ||
-                    !(unit = virXMLPropString(cur, "unit"))) {
-                    virReportError(VIR_ERR_XML_ERROR, "%s",
-                                   _("'bus', 'target', and 'unit' must be specified "
-                                     "for scsi hostdev source address"));
-                    return -1;
-                }
-
-                if (virStrToLong_uip(bus, NULL, 0, &scsihostsrc->bus) < 0) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("cannot parse bus '%s'"), bus);
-                    return -1;
-                }
-
-                if (virStrToLong_uip(target, NULL, 0,
-                                    &scsihostsrc->target) < 0) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("cannot parse target '%s'"), target);
-                    return -1;
-                }
-
-                if (virStrToLong_ullp(unit, NULL, 0, &scsihostsrc->unit) < 0) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR,
-                                   _("cannot parse unit '%s'"), unit);
-                    return -1;
-                }
-
-                got_address = true;
-            } else if (virXMLNodeNameEqual(cur, "adapter")) {
-                if (got_adapter) {
-                    virReportError(VIR_ERR_XML_ERROR, "%s",
-                                   _("more than one adapters is specified "
-                                     "for scsi hostdev source"));
-                    return -1;
-                }
-                if (!(scsihostsrc->adapter = virXMLPropString(cur, "name"))) {
-                    virReportError(VIR_ERR_XML_ERROR, "%s",
-                                   _("'adapter' must be specified for scsi hostdev source"));
-                    return -1;
-                }
-
-                got_adapter = true;
-            } else {
-                virReportError(VIR_ERR_XML_ERROR,
-                               _("unsupported element '%s' of scsi hostdev source"),
-                               cur->name);
-                return -1;
-            }
-        }
-        cur = cur->next;
-    }
-
-    if (!got_address || !got_adapter) {
+    if (!(addressnode = virXPathNode("./address", ctxt))) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
-                       _("'adapter' and 'address' must be specified for scsi "
-                         "hostdev source"));
+                       _("'address' must be specified for scsi hostdev source"));
         return -1;
     }
 
+    if (!(bus = virXMLPropString(addressnode, "bus")) ||
+        !(target = virXMLPropString(addressnode, "target")) ||
+        !(unit = virXMLPropString(addressnode, "unit"))) {
+        virReportError(VIR_ERR_XML_ERROR, "%s",
+                       _("'bus', 'target', and 'unit' must be specified "
+                         "for scsi hostdev source address"));
+        return -1;
+    }
+
+    if (virStrToLong_uip(bus, NULL, 0, &scsihostsrc->bus) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("cannot parse bus '%s'"), bus);
+        return -1;
+    }
+
+    if (virStrToLong_uip(target, NULL, 0, &scsihostsrc->target) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("cannot parse target '%s'"), target);
+        return -1;
+    }
+
+    if (virStrToLong_ullp(unit, NULL, 0, &scsihostsrc->unit) < 0) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("cannot parse unit '%s'"), unit);
+        return -1;
+    }
+
+    if (!(scsihostsrc->adapter = virXPathString("string(./adapter/@name)", ctxt))) {
+        virReportError(VIR_ERR_XML_ERROR, "%s",
+                       _("'adapter' name must be specified for scsi hostdev source"));
+        return -1;
+    }
+
+    if (flags & VIR_DOMAIN_DEF_PARSE_STATUS &&
+        xmlopt && xmlopt->privateData.storageParse) {
+        if ((ctxt->node = virXPathNode("./privateData", ctxt))) {
+            if (!scsihostsrc->src &&
+                !(scsihostsrc->src = virStorageSourceNew()))
+                return -1;
+            if (xmlopt->privateData.storageParse(ctxt, scsihostsrc->src) < 0)
+                return -1;
+        }
+    }
     return 0;
 }
+
 
 static int
 virDomainHostdevSubsysSCSIiSCSIDefParseXML(xmlNodePtr sourcenode,
@@ -8367,7 +8359,7 @@ virDomainHostdevSubsysSCSIiSCSIDefParseXML(xmlNodePtr sourcenode,
         return -1;
     }
 
-    if (virDomainStorageNetworkParseHosts(sourcenode, &iscsisrc->src->hosts,
+    if (virDomainStorageNetworkParseHosts(sourcenode, ctxt, &iscsisrc->src->hosts,
                                           &iscsisrc->src->nhosts) < 0)
         return -1;
 
@@ -8435,7 +8427,8 @@ virDomainHostdevSubsysSCSIDefParseXML(xmlNodePtr sourcenode,
 
     switch ((virDomainHostdevSCSIProtocolType) scsisrc->protocol) {
     case VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_NONE:
-        return virDomainHostdevSubsysSCSIHostDefParseXML(sourcenode, scsisrc);
+        return virDomainHostdevSubsysSCSIHostDefParseXML(sourcenode, ctxt, scsisrc,
+                                                         flags, xmlopt);
 
     case VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI:
         return virDomainHostdevSubsysSCSIiSCSIDefParseXML(sourcenode, scsisrc, ctxt,
@@ -9640,7 +9633,7 @@ virDomainDiskSourceNetworkParse(xmlNodePtr node,
         src->protocol == VIR_STORAGE_NET_PROTOCOL_HTTPS)
         src->query = virXMLPropString(node, "query");
 
-    if (virDomainStorageNetworkParseHosts(node, &src->hosts, &src->nhosts) < 0)
+    if (virDomainStorageNetworkParseHosts(node, ctxt, &src->hosts, &src->nhosts) < 0)
         return -1;
 
     virStorageSourceNetworkAssignDefaultPorts(src);
@@ -26247,6 +26240,10 @@ virDomainHostdevDefFormatSubsysPCI(virBufferPtr buf,
     g_auto(virBuffer) origstatesChildBuf = VIR_BUFFER_INIT_CHILD(&sourceChildBuf);
     virDomainHostdevSubsysPCIPtr pcisrc = &def->source.subsys.u.pci;
 
+    if (def->writeFiltering != VIR_TRISTATE_BOOL_ABSENT)
+            virBufferAsprintf(&sourceAttrBuf, " writeFiltering='%s'",
+                              virTristateBoolTypeToString(def->writeFiltering));
+
     if (pcisrc->backend != VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT) {
         const char *backend = virDomainHostdevSubsysPCIBackendTypeToString(pcisrc->backend);
 
@@ -26323,6 +26320,11 @@ virDomainHostdevDefFormatSubsysSCSI(virBufferPtr buf,
         virBufferAsprintf(&sourceChildBuf, " bus='%u' target='%u' unit='%llu'",
                           scsihostsrc->bus, scsihostsrc->target, scsihostsrc->unit);
         virBufferAddLit(&sourceChildBuf, "/>\n");
+
+        if (scsihostsrc->src &&
+            virDomainDiskSourceFormatPrivateData(&sourceChildBuf, scsihostsrc->src,
+                                                 flags, xmlopt) < 0)
+            return -1;
     }
 
     virXMLFormatElement(buf, "source", &sourceAttrBuf, &sourceChildBuf);

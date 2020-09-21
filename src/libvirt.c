@@ -242,10 +242,10 @@ virGlobalInit(void)
 
     g_networking_init();
 
-#ifdef HAVE_LIBINTL_H
+#ifdef WITH_LIBINTL_H
     if (!bindtextdomain(PACKAGE, LOCALEDIR))
         goto error;
-#endif /* HAVE_LIBINTL_H */
+#endif /* WITH_LIBINTL_H */
 
     /*
      * Note that the order is important: the first ones have a higher
@@ -667,6 +667,48 @@ virStateInitialize(bool privileged,
                 return -1;
             }
         }
+    }
+    return 0;
+}
+
+
+/**
+ * virStateShutdownPrepare:
+ *
+ * Run each virtualization driver's shutdown prepare method.
+ *
+ * Returns 0 if all succeed, -1 upon any failure.
+ */
+int
+virStateShutdownPrepare(void)
+{
+    size_t i;
+
+    for (i = 0; i < virStateDriverTabCount; i++) {
+        if (virStateDriverTab[i]->stateShutdownPrepare &&
+            virStateDriverTab[i]->stateShutdownPrepare() < 0)
+            return -1;
+    }
+    return 0;
+}
+
+
+/**
+ * virStateShutdownWait:
+ *
+ * Run each virtualization driver's shutdown wait method.
+ *
+ * Returns 0 if all succeed, -1 upon any failure.
+ */
+int
+virStateShutdownWait(void)
+{
+    size_t i;
+
+    for (i = 0; i < virStateDriverTabCount; i++) {
+        if (virStateDriverTab[i]->stateShutdownWait &&
+            virStateDriverTab[i]->stateShutdownWait() < 0)
+            return -1;
     }
     return 0;
 }

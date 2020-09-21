@@ -3269,15 +3269,20 @@ virDomainMigrateVersion3Params(virDomainPtr domain,
                                         params, nparams, true, flags);
 }
 
-
-static int
+int
 virDomainMigrateCheckNotLocal(const char *dconnuri)
 {
     g_autoptr(virURI) tempuri = NULL;
 
     if (!(tempuri = virURIParse(dconnuri)))
         return -1;
-    if (!tempuri->server || STRPREFIX(tempuri->server, "localhost")) {
+
+    /*
+     * If someone migrates explicitly to a unix socket, then they have to know
+     * what they are doing and it most probably was not a mistake.
+     */
+    if ((tempuri->server && STRPREFIX(tempuri->server, "localhost")) ||
+        (!tempuri->server && !virURICheckUnixSocket(tempuri))) {
         virReportInvalidArg(dconnuri, "%s",
                             _("Attempt to migrate guest to the same host"));
         return -1;

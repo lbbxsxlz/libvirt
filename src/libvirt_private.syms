@@ -143,6 +143,7 @@ virPCIDeviceAddressParseXML;
 
 # conf/domain_addr.h
 virDomainCCWAddressAssign;
+virDomainCCWAddressAsString;
 virDomainCCWAddressSetCreateFromDomain;
 virDomainCCWAddressSetFree;
 virDomainPCIAddressBusIsFullyReserved;
@@ -1481,6 +1482,7 @@ virHostdevUpdateActiveUSBDevices;
 virConnectSupportsFeature;
 virDomainMigrateBegin3;
 virDomainMigrateBegin3Params;
+virDomainMigrateCheckNotLocal;
 virDomainMigrateConfirm3;
 virDomainMigrateConfirm3Params;
 virDomainMigrateFinish;
@@ -1508,6 +1510,8 @@ virSetSharedStorageDriver;
 virStateCleanup;
 virStateInitialize;
 virStateReload;
+virStateShutdownPrepare;
+virStateShutdownWait;
 virStateStop;
 virStreamInData;
 
@@ -1944,23 +1948,6 @@ virDaemonSetupLogging;
 virDaemonUnixSocketPaths;
 
 
-# util/virdbus.h
-virDBusCallMethod;
-virDBusCloseSystemBus;
-virDBusCreateMethod;
-virDBusCreateMethodV;
-virDBusCreateReply;
-virDBusCreateReplyV;
-virDBusErrorIsUnknownMethod;
-virDBusGetSessionBus;
-virDBusGetSystemBus;
-virDBusHasSystemBus;
-virDBusMessageDecode;
-virDBusMessageEncode;
-virDBusMessageUnref;
-virDBusSetSharedBus;
-
-
 # util/virdevmapper.h
 virDevMapperGetTargets;
 virIsDevMapperDevice;
@@ -2184,6 +2171,20 @@ virFirmwareFree;
 virFirmwareFreeList;
 virFirmwareParse;
 virFirmwareParseList;
+
+
+# util/virgdbus.h
+virGDBusCallMethod;
+virGDBusCallMethodWithFD;
+virGDBusCloseSystemBus;
+virGDBusErrorIsUnknownMethod;
+virGDBusGetSessionBus;
+virGDBusGetSystemBus;
+virGDBusHasSystemBus;
+virGDBusIsServiceEnabled;
+virGDBusIsServiceRegistered;
+virGDBusMessageIsSignal;
+virGDBusSetSharedBus;
 
 
 # util/virgettext.h
@@ -2632,7 +2633,6 @@ virNetDevIPRouteGetAddress;
 virNetDevIPRouteGetGateway;
 virNetDevIPRouteGetMetric;
 virNetDevIPRouteGetPrefix;
-virNetDevIPWaitDadFinish;
 
 
 # util/virnetdevmacvlan.h
@@ -2642,7 +2642,6 @@ virNetDevMacVLanDelete;
 virNetDevMacVLanDeleteWithVPortProfile;
 virNetDevMacVLanIsMacvtap;
 virNetDevMacVLanModeTypeFromString;
-virNetDevMacVLanReleaseName;
 virNetDevMacVLanReserveName;
 virNetDevMacVLanRestartWithVPortProfile;
 virNetDevMacVLanTapOpen;
@@ -2677,6 +2676,7 @@ virNetDevTapGetName;
 virNetDevTapGetRealDeviceName;
 virNetDevTapInterfaceStats;
 virNetDevTapReattachBridge;
+virNetDevTapReserveName;
 
 
 # util/virnetdevveth.h
@@ -3329,6 +3329,7 @@ virThreadJobSetWorker;
 
 
 # util/virthreadpool.h
+virThreadPoolDrain;
 virThreadPoolFree;
 virThreadPoolGetCurrentWorkers;
 virThreadPoolGetFreeWorkers;
@@ -3339,6 +3340,7 @@ virThreadPoolGetPriorityWorkers;
 virThreadPoolNewFull;
 virThreadPoolSendJob;
 virThreadPoolSetParameters;
+virThreadPoolStop;
 
 
 # util/virtime.h
