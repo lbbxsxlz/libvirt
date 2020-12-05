@@ -115,12 +115,9 @@ virStorageEncryptionCopy(const virStorageEncryption *src)
     virStorageEncryptionPtr ret;
     size_t i;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virStorageEncryption, 1);
 
-    if (VIR_ALLOC_N(ret->secrets, src->nsecrets) < 0)
-        goto error;
-
+    ret->secrets = g_new0(virStorageEncryptionSecretPtr, src->nsecrets);
     ret->nsecrets = src->nsecrets;
     ret->format = src->format;
 
@@ -145,10 +142,9 @@ virStorageEncryptionSecretParse(xmlXPathContextPtr ctxt,
 {
     VIR_XPATH_NODE_AUTORESTORE(ctxt)
     virStorageEncryptionSecretPtr ret;
-    char *type_str = NULL;
+    g_autofree char *type_str = NULL;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virStorageEncryptionSecret, 1);
 
     ctxt->node = node;
 
@@ -168,12 +164,9 @@ virStorageEncryptionSecretParse(xmlXPathContextPtr ctxt,
     if (virSecretLookupParseSecret(node, &ret->seclookupdef) < 0)
         goto cleanup;
 
-    VIR_FREE(type_str);
-
     return ret;
 
  cleanup:
-    VIR_FREE(type_str);
     virStorageEncryptionSecretFree(ret);
     return NULL;
 }
@@ -183,13 +176,12 @@ static int
 virStorageEncryptionInfoParseCipher(xmlNodePtr info_node,
                                     virStorageEncryptionInfoDefPtr info)
 {
-    int ret = -1;
-    char *size_str = NULL;
+    g_autofree char *size_str = NULL;
 
     if (!(info->cipher_name = virXMLPropString(info_node, "name"))) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("cipher info missing 'name' attribute"));
-        goto cleanup;
+        return -1;
     }
 
     if ((size_str = virXMLPropString(info_node, "size")) &&
@@ -197,23 +189,19 @@ virStorageEncryptionInfoParseCipher(xmlNodePtr info_node,
         virReportError(VIR_ERR_XML_ERROR,
                        _("cannot parse cipher size: '%s'"),
                        size_str);
-        goto cleanup;
+        return -1;
     }
 
     if (!size_str) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
                        _("cipher info missing 'size' attribute"));
-        goto cleanup;
+        return -1;
     }
 
     info->cipher_mode = virXMLPropString(info_node, "mode");
     info->cipher_hash = virXMLPropString(info_node, "hash");
 
-    ret = 0;
-
- cleanup:
-    VIR_FREE(size_str);
-    return ret;
+    return 0;
 }
 
 
@@ -241,14 +229,13 @@ virStorageEncryptionParseNode(xmlNodePtr node,
     xmlNodePtr *nodes = NULL;
     virStorageEncryptionPtr encdef = NULL;
     virStorageEncryptionPtr ret = NULL;
-    char *format_str = NULL;
+    g_autofree char *format_str = NULL;
     int n;
     size_t i;
 
     ctxt->node = node;
 
-    if (VIR_ALLOC(encdef) < 0)
-        goto cleanup;
+    encdef = g_new0(virStorageEncryption, 1);
 
     if (!(format_str = virXPathString("string(./@format)", ctxt))) {
         virReportError(VIR_ERR_XML_ERROR, "%s",
@@ -268,8 +255,7 @@ virStorageEncryptionParseNode(xmlNodePtr node,
         goto cleanup;
 
     if (n > 0) {
-        if (VIR_ALLOC_N(encdef->secrets, n) < 0)
-            goto cleanup;
+        encdef->secrets = g_new0(virStorageEncryptionSecretPtr, n);
         encdef->nsecrets = n;
 
         for (i = 0; i < n; i++) {
@@ -303,7 +289,6 @@ virStorageEncryptionParseNode(xmlNodePtr node,
     ret = g_steal_pointer(&encdef);
 
  cleanup:
-    VIR_FREE(format_str);
     VIR_FREE(nodes);
     virStorageEncryptionFree(encdef);
 

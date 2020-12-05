@@ -681,17 +681,8 @@ AppArmorSetMemoryLabel(virSecurityManagerPtr mgr,
                        virDomainDefPtr def,
                        virDomainMemoryDefPtr mem)
 {
-    if (mem == NULL)
-        return 0;
-
-    switch ((virDomainMemoryModel) mem->model) {
+    switch (mem->model) {
     case VIR_DOMAIN_MEMORY_MODEL_NVDIMM:
-        if (mem->nvdimmPath == NULL) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("%s: nvdimm without a path"),
-                           __func__);
-            return -1;
-        }
         if (!virFileExists(mem->nvdimmPath)) {
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("%s: \'%s\' does not exist"),
@@ -867,8 +858,7 @@ AppArmorSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
     if (profile_loaded(secdef->imagelabel) < 0)
         return 0;
 
-    if (VIR_ALLOC(ptr) < 0)
-        return -1;
+    ptr = g_new0(struct SDPDOP, 1);
     ptr->mgr = mgr;
     ptr->def = def;
 

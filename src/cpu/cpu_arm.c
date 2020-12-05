@@ -415,11 +415,12 @@ virCPUarmGetMap(void)
 
 static int
 virCPUarmUpdate(virCPUDefPtr guest,
-                const virCPUDef *host)
+                const virCPUDef *host,
+                bool relative)
 {
     g_autoptr(virCPUDef) updated = NULL;
 
-    if (guest->mode != VIR_CPU_MODE_HOST_MODEL)
+    if (!relative || guest->mode != VIR_CPU_MODE_HOST_MODEL)
         return 0;
 
     if (!host) {
@@ -463,10 +464,43 @@ virCPUarmBaseline(virCPUDefPtr *cpus,
 }
 
 static virCPUCompareResult
-virCPUarmCompare(virCPUDefPtr host G_GNUC_UNUSED,
-                 virCPUDefPtr cpu G_GNUC_UNUSED,
-                 bool failMessages G_GNUC_UNUSED)
+virCPUarmCompare(virCPUDefPtr host,
+                 virCPUDefPtr cpu,
+                 bool failIncompatible)
 {
+    /* Only support host to host CPU compare for ARM */
+    if (cpu->type != VIR_CPU_TYPE_HOST)
+        return VIR_CPU_COMPARE_IDENTICAL;
+
+    if (!host || !host->model) {
+        if (failIncompatible) {
+            virReportError(VIR_ERR_CPU_INCOMPATIBLE, "%s",
+                           _("unknown host CPU"));
+            return VIR_CPU_COMPARE_ERROR;
+        }
+
+        VIR_WARN("unknown host CPU");
+        return VIR_CPU_COMPARE_INCOMPATIBLE;
+    }
+
+    /* Compare vendor and model to check if CPUs are identical */
+    if (STRNEQ_NULLABLE(host->vendor, cpu->vendor) ||
+        STRNEQ_NULLABLE(host->model, cpu->model)) {
+        VIR_DEBUG("Host CPU model does not match required CPU "
+                  "vendor %s or(and) model %s",
+                  NULLSTR(cpu->vendor), NULLSTR(cpu->model));
+
+        if (failIncompatible) {
+            virReportError(VIR_ERR_CPU_INCOMPATIBLE,
+                           _("Host CPU model does not match required CPU "
+                             "vendor %s or(and) model %s"),
+                           NULLSTR(cpu->vendor), NULLSTR(cpu->model));
+            return VIR_CPU_COMPARE_ERROR;
+        }
+
+        return VIR_CPU_COMPARE_INCOMPATIBLE;
+    }
+
     return VIR_CPU_COMPARE_IDENTICAL;
 }
 
@@ -516,7 +550,7 @@ virCPUarmCpuDataFromRegs(virCPUarmData *data)
 {
     unsigned long cpuid;
     unsigned long hwcaps;
-    VIR_AUTOSTRINGLIST features = NULL;
+    g_auto(GStrv) features = NULL;
     int cpu_feature_index = 0;
     size_t i;
 

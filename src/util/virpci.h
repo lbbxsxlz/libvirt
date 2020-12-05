@@ -234,10 +234,6 @@ int virPCIGetNetName(const char *device_link_sysfs_path,
                      char *physPortID,
                      char **netname);
 
-int virPCIGetSysfsFile(char *virPCIDeviceName,
-                             char **pci_sysfs_device_link)
-    G_GNUC_WARN_UNUSED_RESULT;
-
 bool virPCIDeviceAddressIsValid(virPCIDeviceAddressPtr addr,
                                 bool report);
 bool virPCIDeviceAddressIsEmpty(const virPCIDeviceAddress *addr);
@@ -278,9 +274,6 @@ int virPCIDeviceGetLinkCapSta(virPCIDevicePtr dev,
 int virPCIGetHeaderType(virPCIDevicePtr dev, int *hdrType);
 
 void virPCIEDeviceInfoFree(virPCIEDeviceInfoPtr dev);
-
-ssize_t virPCIGetMdevTypes(const char *sysfspath,
-                           virMediatedDeviceType ***types);
 
 void virPCIDeviceAddressFree(virPCIDeviceAddressPtr address);
 

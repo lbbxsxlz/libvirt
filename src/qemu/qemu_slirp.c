@@ -81,12 +81,9 @@ qemuSlirpHasFeature(const qemuSlirp *slirp,
 qemuSlirpPtr
 qemuSlirpNew(void)
 {
-    g_autoptr(qemuSlirp) slirp = NULL;
+    g_autoptr(qemuSlirp) slirp = g_new0(qemuSlirp, 1);
 
-    if (VIR_ALLOC(slirp) < 0 ||
-        !(slirp->features = virBitmapNew(QEMU_SLIRP_FEATURE_LAST)))
-        return NULL;
-
+    slirp->features = virBitmapNew(QEMU_SLIRP_FEATURE_LAST);
     slirp->pid = (pid_t)-1;
     slirp->fd[0] = slirp->fd[1] = -1;
 
@@ -103,9 +100,6 @@ qemuSlirpNewForHelper(const char *helper)
     g_autoptr(virJSONValue) doc = NULL;
     virJSONValuePtr featuresJSON;
     size_t i, nfeatures;
-
-    if (!helper)
-        return NULL;
 
     slirp = qemuSlirpNew();
     if (!slirp) {
@@ -257,7 +251,6 @@ qemuSlirpStart(qemuSlirpPtr slirp,
                virDomainNetDefPtr net,
                bool incoming)
 {
-    qemuDomainObjPrivatePtr priv = vm->privateData;
     g_autoptr(virQEMUDriverConfig) cfg = virQEMUDriverGetConfig(driver);
     g_autoptr(virCommand) cmd = NULL;
     g_autofree char *pidfile = NULL;
@@ -361,9 +354,6 @@ qemuSlirpStart(qemuSlirpPtr slirp,
     }
 
     slirp->pid = pid;
-
-    if (priv->cgroup && qemuSlirpSetupCgroup(slirp, priv->cgroup) < 0)
-        goto error;
 
     return 0;
 

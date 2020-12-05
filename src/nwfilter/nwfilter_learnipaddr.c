@@ -112,10 +112,10 @@ struct ether_vlan_header
 
 
 static virMutex pendingLearnReqLock = VIR_MUTEX_INITIALIZER;
-static virHashTablePtr pendingLearnReq;
+static GHashTable *pendingLearnReq;
 
 static virMutex ifaceMapLock = VIR_MUTEX_INITIALIZER;
-static virHashTablePtr ifaceLockMap;
+static GHashTable *ifaceLockMap;
 
 typedef struct _virNWFilterIfaceLock virNWFilterIfaceLock;
 typedef virNWFilterIfaceLock *virNWFilterIfaceLockPtr;
@@ -777,11 +777,11 @@ virNWFilterLearnInit(void)
     VIR_DEBUG("Initializing IP address learning");
     threadsTerminate = false;
 
-    pendingLearnReq = virHashCreate(0, freeLearnReqEntry);
+    pendingLearnReq = virHashNew(freeLearnReqEntry);
     if (!pendingLearnReq)
         return -1;
 
-    ifaceLockMap = virHashCreate(0, virHashValueFree);
+    ifaceLockMap = virHashNew(g_free);
     if (!ifaceLockMap) {
         virNWFilterLearnShutdown();
         return -1;

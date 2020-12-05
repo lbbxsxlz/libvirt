@@ -65,6 +65,7 @@ typedef enum {
     VIR_NODE_DEV_CAP_MDEV,              /* Mediated device */
     VIR_NODE_DEV_CAP_CCW_DEV,           /* s390 CCW device */
     VIR_NODE_DEV_CAP_CSS_DEV,           /* s390 channel subsystem device */
+    VIR_NODE_DEV_CAP_VDPA,              /* vDPA device */
 
     VIR_NODE_DEV_CAP_LAST
 } virNodeDevCapType;
@@ -100,6 +101,10 @@ typedef enum {
     VIR_NODE_DEV_CAP_FLAG_PCIE                      = (1 << 2),
     VIR_NODE_DEV_CAP_FLAG_PCI_MDEV                  = (1 << 3),
 } virNodeDevPCICapFlags;
+
+typedef enum {
+    VIR_NODE_DEV_CAP_FLAG_CSS_MDEV                  = (1 << 0),
+} virNodeDevCCWCapFlags;
 
 typedef enum {
     /* Keep in sync with VIR_ENUM_IMPL in node_device_conf.c */
@@ -273,6 +278,15 @@ struct _virNodeDevCapCCW {
     unsigned int cssid;
     unsigned int ssid;
     unsigned int devno;
+    unsigned int flags; /* enum virNodeDevCCWCapFlags */
+    virMediatedDeviceTypePtr *mdev_types;
+    size_t nmdev_types;
+};
+
+typedef struct _virNodeDevCapVDPA virNodeDevCapVDPA;
+typedef virNodeDevCapVDPA *virNodeDevCapVDPAPtr;
+struct _virNodeDevCapVDPA {
+    char *chardev;
 };
 
 typedef struct _virNodeDevCapData virNodeDevCapData;
@@ -293,6 +307,7 @@ struct _virNodeDevCapData {
         virNodeDevCapDRM drm;
         virNodeDevCapMdev mdev;
         virNodeDevCapCCW ccw_dev;
+        virNodeDevCapVDPA vdpa;
     };
 };
 
@@ -369,7 +384,8 @@ virNodeDevCapsDefFree(virNodeDevCapsDefPtr caps);
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV_TYPES    | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_MDEV          | \
                  VIR_CONNECT_LIST_NODE_DEVICES_CAP_CCW_DEV       | \
-                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_CSS_DEV)
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_CSS_DEV       | \
+                 VIR_CONNECT_LIST_NODE_DEVICES_CAP_VDPA)
 
 int
 virNodeDeviceGetSCSIHostCaps(virNodeDevCapSCSIHostPtr scsi_host);
@@ -381,6 +397,10 @@ virNodeDeviceGetSCSITargetCaps(const char *sysfsPath,
 int
 virNodeDeviceGetPCIDynamicCaps(const char *sysfsPath,
                                virNodeDevCapPCIDevPtr pci_dev);
+
+int
+virNodeDeviceGetCSSDynamicCaps(const char *sysfsPath,
+                               virNodeDevCapCCWPtr ccw_dev);
 
 int
 virNodeDeviceUpdateCaps(virNodeDeviceDefPtr def);

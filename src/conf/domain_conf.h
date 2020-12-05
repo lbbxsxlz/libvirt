@@ -599,6 +599,7 @@ typedef enum {
     VIR_DOMAIN_CONTROLLER_TYPE_USB,
     VIR_DOMAIN_CONTROLLER_TYPE_PCI,
     VIR_DOMAIN_CONTROLLER_TYPE_XENBUS,
+    VIR_DOMAIN_CONTROLLER_TYPE_ISA,
 
     VIR_DOMAIN_CONTROLLER_TYPE_LAST
 } virDomainControllerType;
@@ -648,6 +649,9 @@ typedef enum {
     VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1078,
     VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_TRANSITIONAL,
     VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_NON_TRANSITIONAL,
+    VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90,
+    VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DC390,
+    VIR_DOMAIN_CONTROLLER_MODEL_SCSI_AM53C974,
 
     VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST
 } virDomainControllerModelSCSI;
@@ -689,6 +693,12 @@ typedef enum {
 
     VIR_DOMAIN_CONTROLLER_MODEL_VIRTIO_SERIAL_LAST
 } virDomainControllerModelVirtioSerial;
+
+typedef enum {
+    VIR_DOMAIN_CONTROLLER_MODEL_ISA_DEFAULT = -1,
+
+    VIR_DOMAIN_CONTROLLER_MODEL_ISA_LAST
+} virDomainControllerModelISA;
 
 #define IS_USB2_CONTROLLER(ctrl) \
     (((ctrl)->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) && \
@@ -842,6 +852,8 @@ struct _virDomainFSDef {
     int wrpolicy; /* enum virDomainFSWrpolicy */
     int format; /* virStorageFileFormat */
     int model; /* virDomainFSModel */
+    unsigned int fmode;
+    unsigned int dmode;
     int multidevs; /* virDomainFSMultidevs */
     unsigned long long usage; /* in bytes */
     virStorageSourcePtr src;
@@ -876,6 +888,7 @@ typedef enum {
     VIR_DOMAIN_NET_TYPE_DIRECT,
     VIR_DOMAIN_NET_TYPE_HOSTDEV,
     VIR_DOMAIN_NET_TYPE_UDP,
+    VIR_DOMAIN_NET_TYPE_VDPA,
 
     VIR_DOMAIN_NET_TYPE_LAST
 } virDomainNetType;
@@ -1050,6 +1063,9 @@ struct _virDomainNetDef {
             virDomainActualNetDefPtr actual;
         } network;
         struct {
+            char *devicepath;
+        } vdpa;
+        struct {
             char *brname;
         } bridge;
         struct {
@@ -1080,7 +1096,7 @@ struct _virDomainNetDef {
     virNetDevIPInfo guestIP;
     virDomainDeviceInfo info;
     char *filter;
-    virHashTablePtr filterparams;
+    GHashTable *filterparams;
     virNetDevBandwidthPtr bandwidth;
     virNetDevVlan vlan;
     int trustGuestRxFilters; /* enum virTristateBool */
@@ -1783,6 +1799,7 @@ struct _virDomainMemballoonDef {
     virDomainDeviceInfo info;
     int period; /* seconds between collections */
     int autodeflate; /* enum virTristateSwitch */
+    int free_page_reporting; /* enum virTristateSwitch */
     virDomainVirtioOptionsPtr virtio;
 };
 
@@ -1898,6 +1915,7 @@ typedef enum {
 typedef enum {
     VIR_DOMAIN_KVM_HIDDEN = 0,
     VIR_DOMAIN_KVM_DEDICATED,
+    VIR_DOMAIN_KVM_POLLCONTROL,
 
     VIR_DOMAIN_KVM_LAST
 } virDomainKVM;
@@ -2193,7 +2211,7 @@ struct _virDomainTimerDef {
     int track;  /* boot|guest|wall */
 
     /* frequency & mode are only valid for name='tsc' */
-    unsigned long frequency; /* in Hz, unspecified = 0 */
+    unsigned long long frequency; /* in Hz, unspecified = 0 */
     int mode;       /* auto|native|emulate|paravirt */
 };
 
@@ -2304,7 +2322,7 @@ struct _virDomainMemoryDef {
     bool nvdimmPmem; /* valid only for NVDIMM */
 
     /* target */
-    int model; /* virDomainMemoryModel */
+    virDomainMemoryModel model;
     int targetNode;
     unsigned long long size; /* kibibytes */
     unsigned long long labelsize; /* kibibytes; valid only for NVDIMM */
@@ -2483,7 +2501,9 @@ struct _virDomainSEVDef {
     char *dh_cert;
     char *session;
     unsigned int policy;
+    bool haveCbitpos;
     unsigned int cbitpos;
+    bool haveReducedPhysBits;
     unsigned int reduced_phys_bits;
 };
 
@@ -2729,7 +2749,7 @@ typedef enum {
     VIR_DOMAIN_TAINT_SHELL_SCRIPTS,    /* Network configuration using opaque shell scripts */
     VIR_DOMAIN_TAINT_DISK_PROBING,     /* Relying on potentially unsafe disk format probing */
     VIR_DOMAIN_TAINT_EXTERNAL_LAUNCH,  /* Externally launched guest domain */
-    VIR_DOMAIN_TAINT_HOST_CPU,         /* Host CPU passthrough in use */
+    VIR_DOMAIN_TAINT_HOST_CPU,         /* Host CPU passthrough in use after migration */
     VIR_DOMAIN_TAINT_HOOK,             /* Domain (possibly) changed via hook script */
     VIR_DOMAIN_TAINT_CDROM_PASSTHROUGH,/* CDROM passthrough */
     VIR_DOMAIN_TAINT_CUSTOM_DTB,       /* Custom device tree blob was specified */
@@ -3020,16 +3040,15 @@ const char *virDomainInputDefGetPath(virDomainInputDefPtr input);
 void virDomainInputDefFree(virDomainInputDefPtr def);
 virDomainDiskDefPtr virDomainDiskDefNew(virDomainXMLOptionPtr xmlopt);
 void virDomainDiskDefFree(virDomainDiskDefPtr def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainDiskDef, virDomainDiskDefFree);
 void virDomainLeaseDefFree(virDomainLeaseDefPtr def);
 int virDomainDiskGetType(virDomainDiskDefPtr def);
 void virDomainDiskSetType(virDomainDiskDefPtr def, int type);
 const char *virDomainDiskGetSource(virDomainDiskDef const *def);
-int virDomainDiskSetSource(virDomainDiskDefPtr def, const char *src)
-    G_GNUC_WARN_UNUSED_RESULT;
+void virDomainDiskSetSource(virDomainDiskDefPtr def, const char *src);
 void virDomainDiskEmptySource(virDomainDiskDefPtr def);
 const char *virDomainDiskGetDriver(const virDomainDiskDef *def);
-int virDomainDiskSetDriver(virDomainDiskDefPtr def, const char *name)
-    G_GNUC_WARN_UNUSED_RESULT;
+void virDomainDiskSetDriver(virDomainDiskDefPtr def, const char *name);
 int virDomainDiskGetFormat(virDomainDiskDefPtr def);
 void virDomainDiskSetFormat(virDomainDiskDefPtr def, int format);
 virDomainControllerDefPtr
@@ -3041,6 +3060,7 @@ virDomainDiskDefPtr virDomainDiskFindByBusAndDst(virDomainDefPtr def,
 
 virDomainControllerDefPtr virDomainControllerDefNew(virDomainControllerType type);
 void virDomainControllerDefFree(virDomainControllerDefPtr def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainControllerDef, virDomainControllerDefFree);
 bool virDomainControllerIsPSeriesPHB(const virDomainControllerDef *cont);
 
 virDomainFSDefPtr virDomainFSDefNew(virDomainXMLOptionPtr xmlopt);
@@ -3049,9 +3069,9 @@ void virDomainActualNetDefFree(virDomainActualNetDefPtr def);
 virDomainVsockDefPtr virDomainVsockDefNew(virDomainXMLOptionPtr xmlopt);
 void virDomainVsockDefFree(virDomainVsockDefPtr vsock);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainVsockDef, virDomainVsockDefFree);
-void virDomainNetDefClear(virDomainNetDefPtr def);
 void virDomainNetDefFree(virDomainNetDefPtr def);
 void virDomainSmartcardDefFree(virDomainSmartcardDefPtr def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainSmartcardDef, virDomainSmartcardDefFree);
 void virDomainChrDefFree(virDomainChrDefPtr def);
 int virDomainChrSourceDefCopy(virDomainChrSourceDefPtr dest,
                               virDomainChrSourceDefPtr src);
@@ -3066,6 +3086,7 @@ void virDomainNVRAMDefFree(virDomainNVRAMDefPtr def);
 void virDomainWatchdogDefFree(virDomainWatchdogDefPtr def);
 virDomainVideoDefPtr virDomainVideoDefNew(virDomainXMLOptionPtr xmlopt);
 void virDomainVideoDefFree(virDomainVideoDefPtr def);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virDomainVideoDef, virDomainVideoDefFree);
 void virDomainVideoDefClear(virDomainVideoDefPtr def);
 virDomainHostdevDefPtr virDomainHostdevDefNew(void);
 void virDomainHostdevDefClear(virDomainHostdevDefPtr def);
@@ -3341,9 +3362,7 @@ virDomainDiskDefPtr
 virDomainDiskByTarget(virDomainDefPtr def,
                       const char *dst);
 
-int virDomainDiskInsert(virDomainDefPtr def,
-                        virDomainDiskDefPtr disk)
-    G_GNUC_WARN_UNUSED_RESULT;
+void virDomainDiskInsert(virDomainDefPtr def, virDomainDiskDefPtr disk);
 void virDomainDiskInsertPreAlloced(virDomainDefPtr def,
                                    virDomainDiskDefPtr disk);
 int virDomainStorageNetworkParseHost(xmlNodePtr hostnode,
@@ -3406,9 +3425,7 @@ int virDomainNetAppendIPAddress(virDomainNetDefPtr def,
                                 int family,
                                 unsigned int prefix);
 
-int virDomainControllerInsert(virDomainDefPtr def,
-                              virDomainControllerDefPtr controller)
-    G_GNUC_WARN_UNUSED_RESULT;
+void virDomainControllerInsert(virDomainDefPtr def, virDomainControllerDefPtr controller);
 void virDomainControllerInsertPreAlloced(virDomainDefPtr def,
                                          virDomainControllerDefPtr controller);
 int virDomainControllerFind(const virDomainDef *def, int type, int idx);
@@ -3423,10 +3440,8 @@ const char *virDomainControllerAliasFind(const virDomainDef *def,
 
 int virDomainLeaseIndex(virDomainDefPtr def,
                         virDomainLeaseDefPtr lease);
-int virDomainLeaseInsert(virDomainDefPtr def,
-                         virDomainLeaseDefPtr lease);
-int virDomainLeaseInsertPreAlloc(virDomainDefPtr def)
-    G_GNUC_WARN_UNUSED_RESULT;
+void virDomainLeaseInsert(virDomainDefPtr def, virDomainLeaseDefPtr lease);
+void virDomainLeaseInsertPreAlloc(virDomainDefPtr def);
 void virDomainLeaseInsertPreAlloced(virDomainDefPtr def,
                                     virDomainLeaseDefPtr lease);
 virDomainLeaseDefPtr
@@ -3597,6 +3612,7 @@ VIR_ENUM_DECL(virDomainControllerModelSCSI);
 VIR_ENUM_DECL(virDomainControllerModelUSB);
 VIR_ENUM_DECL(virDomainControllerModelIDE);
 VIR_ENUM_DECL(virDomainControllerModelVirtioSerial);
+VIR_ENUM_DECL(virDomainControllerModelISA);
 VIR_ENUM_DECL(virDomainFS);
 VIR_ENUM_DECL(virDomainFSDriver);
 VIR_ENUM_DECL(virDomainFSAccessMode);
@@ -3790,8 +3806,8 @@ virDomainGetBlkioParametersAssignFromDef(virDomainDefPtr def,
                                          int *nparams,
                                          int maxparams);
 
-int virDomainDiskSetBlockIOTune(virDomainDiskDefPtr disk,
-                                virDomainBlockIoTuneInfo *info);
+void virDomainDiskSetBlockIOTune(virDomainDiskDefPtr disk,
+                                 virDomainBlockIoTuneInfo *info);
 
 bool
 virDomainNetTypeSharesHostView(const virDomainNetDef *net);

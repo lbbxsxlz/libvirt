@@ -163,10 +163,10 @@ explicitly stated, these work on libvirt 4.4.0 and later. Please note that some
 of the filters below may not log enough information for filing a proper libvirt
 bug. Usually it's better to log more than less.
 
-Targetted logging for debugging QEMU VMs
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Targeted logging for debugging QEMU VMs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Specifying only some sections allows for a targetted filter configuration which
+Specifying only some sections allows for a targeted filter configuration which
 works on all versions and is sufficient for most cases.
 
 ::
@@ -178,13 +178,12 @@ Less verbose logging for QEMU VMs
 
 Some subsystems are very noisy and usually not the culprit of the problems. They
 can be silenced individually for a less verbose log while still logging
-everything else. Usual suspects are the JSON code, udev, authentication and such.
+everything else. Usual suspects are the JSON code, RPC, authentication and such.
 A permissive filter is good for development use cases.
 
 ::
 
-    3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.udev 3:node_device 3:rpc 3:access.accessmanager 3:util.netlink 1:*
-
+    3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.netlink 3:node_device 3:rpc 3:access 1:*
 
 Minimalistic QEMU QMP monitor logging
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

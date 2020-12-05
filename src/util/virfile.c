@@ -131,8 +131,6 @@ int virFileClose(int *fdptr, virFileCloseFlags flags)
                 VIR_DEBUG("Failed to close fd %d: %s",
                           *fdptr, g_strerror(errno));
             }
-        } else {
-            VIR_DEBUG("Closed fd %d", *fdptr);
         }
     }
     *fdptr = -1;
@@ -258,8 +256,7 @@ virFileWrapperFdNew(int *fd, const char *name, unsigned int flags)
         return NULL;
     }
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virFileWrapperFd, 1);
 
     mode = fcntl(*fd, F_GETFL);
 
@@ -670,7 +667,7 @@ static int virFileLoopDeviceOpenLoopCtl(char **dev_name, int *fd)
 static int virFileLoopDeviceOpenSearch(char **dev_name)
 {
     int fd = -1;
-    DIR *dh = NULL;
+    g_autoptr(DIR) dh = NULL;
     struct dirent *de;
     char *looppath = NULL;
     struct loop_info64 lo;
@@ -727,7 +724,6 @@ static int virFileLoopDeviceOpenSearch(char **dev_name)
         VIR_DEBUG("No free loop devices available");
         VIR_FREE(looppath);
     }
-    VIR_DIR_CLOSE(dh);
     return fd;
 }
 
@@ -837,8 +833,7 @@ virFileNBDDeviceIsBusy(const char *dev_name)
 static char *
 virFileNBDDeviceFindUnused(void)
 {
-    DIR *dh;
-    char *ret = NULL;
+    g_autoptr(DIR) dh = NULL;
     struct dirent *de;
     int direrr;
 
@@ -848,22 +843,19 @@ virFileNBDDeviceFindUnused(void)
     while ((direrr = virDirRead(dh, &de, SYSFS_BLOCK_DIR)) > 0) {
         if (STRPREFIX(de->d_name, "nbd")) {
             int rv = virFileNBDDeviceIsBusy(de->d_name);
+
             if (rv < 0)
-                goto cleanup;
-            if (rv == 0) {
-                ret = g_strdup_printf("/dev/%s", de->d_name);
-                goto cleanup;
-            }
+                return NULL;
+
+            if (rv == 0)
+                return g_strdup_printf("/dev/%s", de->d_name);
         }
     }
     if (direrr < 0)
-        goto cleanup;
-    virReportSystemError(EBUSY, "%s",
-                         _("No free NBD devices"));
+        return NULL;
 
- cleanup:
-    VIR_DIR_CLOSE(dh);
-    return ret;
+    virReportSystemError(EBUSY, "%s", _("No free NBD devices"));
+    return NULL;
 }
 
 static bool
@@ -980,9 +972,8 @@ int virFileNBDDeviceAssociate(const char *file,
  */
 int virFileDeleteTree(const char *dir)
 {
-    DIR *dh;
+    g_autoptr(DIR) dh = NULL;
     struct dirent *de;
-    int ret = -1;
     int direrr;
 
     /* Silently return 0 if passed NULL or directory doesn't exist */
@@ -1001,36 +992,32 @@ int virFileDeleteTree(const char *dir)
         if (g_lstat(filepath, &sb) < 0) {
             virReportSystemError(errno, _("Cannot access '%s'"),
                                  filepath);
-            goto cleanup;
+            return -1;
         }
 
         if (S_ISDIR(sb.st_mode)) {
             if (virFileDeleteTree(filepath) < 0)
-                goto cleanup;
+                return -1;
         } else {
             if (unlink(filepath) < 0 && errno != ENOENT) {
                 virReportSystemError(errno,
                                      _("Cannot delete file '%s'"),
                                      filepath);
-                goto cleanup;
+                return -1;
             }
         }
     }
     if (direrr < 0)
-        goto cleanup;
+        return -1;
 
     if (rmdir(dir) < 0 && errno != ENOENT) {
         virReportSystemError(errno,
                              _("Cannot delete directory '%s'"),
                              dir);
-        goto cleanup;
+        return -1;
     }
 
-    ret = 0;
-
- cleanup:
-    VIR_DIR_CLOSE(dh);
-    return ret;
+    return 0;
 }
 
 /* Like read(), but restarts after EINTR.  Doesn't play
@@ -1178,11 +1165,7 @@ safezero_slow(int fd, off_t offset, off_t len)
     remain = len;
     bytes = MIN(1024 * 1024, len);
 
-    r = VIR_ALLOC_N(buf, bytes);
-    if (r < 0) {
-        errno = ENOMEM;
-        return -1;
-    }
+    buf = g_new0(char, bytes);
 
     while (remain) {
         if (bytes > remain)
@@ -1636,7 +1619,7 @@ char *
 virFindFileInPath(const char *file)
 {
     const char *origpath = NULL;
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
     char **pathiter;
 
     if (file == NULL)
@@ -2932,13 +2915,12 @@ int virDirRead(DIR *dirp, struct dirent **ent, const char *name)
     return !!*ent;
 }
 
-void virDirClose(DIR **dirp)
+void virDirClose(DIR *dirp)
 {
-    if (!*dirp)
+    if (!dirp)
         return;
 
-    closedir(*dirp); /* exempt from syntax-check */
-    *dirp = NULL;
+    closedir(dirp); /* exempt from syntax-check */
 }
 
 
@@ -2958,9 +2940,8 @@ int virFileChownFiles(const char *name,
                       gid_t gid)
 {
     struct dirent *ent;
-    int ret = -1;
     int direrr;
-    DIR *dir;
+    g_autoptr(DIR) dir = NULL;
 
     if (virDirOpen(&dir, name) < 0)
         return -1;
@@ -2978,19 +2959,14 @@ int virFileChownFiles(const char *name,
                                  _("cannot chown '%s' to (%u, %u)"),
                                  ent->d_name, (unsigned int) uid,
                                  (unsigned int) gid);
-            goto cleanup;
+            return -1;
         }
     }
 
     if (direrr < 0)
-        goto cleanup;
+        return -1;
 
-    ret = 0;
-
- cleanup:
-    virDirClose(&dir);
-
-    return ret;
+    return 0;
 }
 
 #else /* WIN32 */
@@ -3160,8 +3136,7 @@ virFileOpenTty(int *ttyprimary, char **ttyName, int rawmode)
         size_t len = 64;
         int rc;
 
-        if (VIR_ALLOC_N(name, len) < 0)
-            goto cleanup;
+        name = g_new0(char, len);
 
         while ((rc = ttyname_r(secondary, name, len)) == ERANGE) {
             if (VIR_RESIZE_N(name, len, len, len) < 0)
@@ -3884,7 +3859,6 @@ virFileCopyACLs(const char *src,
  * Returns:
  *  1 : Equal
  *  0 : Non-Equal
- * -1 : Error
  */
 int
 virFileComparePaths(const char *p1, const char *p2)

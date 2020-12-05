@@ -60,8 +60,10 @@ VIR_MOCK_WRAP_RET_ARGS(g_dbus_connection_call_sync,
                        GCancellable *, cancellable,
                        GError **, error)
 {
-    if (parameters)
+    if (parameters) {
+        g_variant_ref_sink(parameters);
         g_variant_unref(parameters);
+    }
 
     VIR_MOCK_REAL_INIT(g_dbus_connection_call_sync);
 
@@ -176,8 +178,6 @@ mymain(void)
                        testCompareXMLToIPTablesHelper, &info) < 0) \
             ret = -1; \
     } while (0)
-
-    virFirewallSetLockOverride(true);
 
     if (virFirewallSetBackend(VIR_FIREWALL_BACKEND_DIRECT) < 0) {
         if (!hasNetfilterTools()) {

@@ -248,7 +248,6 @@ void vshCloseLogFile(vshControl *ctl);
 
 const char *vshCmddefGetInfo(const vshCmdDef *cmd, const char *info);
 const vshCmdDef *vshCmddefSearch(const char *cmdname);
-bool vshCmddefHelp(vshControl *ctl, const vshCmdDef *def);
 const vshCmdGrp *vshCmdGrpSearch(const char *grpname);
 bool vshCmdGrpHelp(vshControl *ctl, const vshCmdGrp *grp);
 
@@ -464,12 +463,6 @@ bool cmdComplete(vshControl *ctl, const vshCmd *cmd);
 char * vshReadline(vshControl *ctl, const char *prompt);
 
 void vshReadlineHistoryAdd(const char *cmd);
-
-/* allocation wrappers */
-void *_vshMalloc(vshControl *ctl, size_t sz, const char *filename, int line);
-#define vshMalloc(_ctl, _sz)    _vshMalloc(_ctl, _sz, __FILE__, __LINE__)
-
-void *vshCalloc(vshControl *ctl, size_t nmemb, size_t sz);
 
 /* Macros to help dealing with mutually exclusive options. */
 

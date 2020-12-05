@@ -55,6 +55,7 @@
   <flag name='virtio-mmio'/>
   <flag name='ich9-intel-hda'/>
   <flag name='boot-strict'/>
+  <flag name='enable-fips'/>
   <flag name='spice-file-xfer-disable'/>
   <flag name='usb-kbd'/>
   <flag name='msg-timestamp'/>
@@ -177,6 +178,9 @@
   <flag name='migration-param.bandwidth'/>
   <flag name='migration-param.downtime'/>
   <flag name='migration-param.xbzrle-cache-size'/>
+  <flag name='fsdev.createmode'/>
+  <flag name='dc390'/>
+  <flag name='am53c974'/>
   <version>4000000</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>0</microcodeVersion>

@@ -95,6 +95,7 @@ virFirewallDGetVersion(unsigned long *version)
 
     if (virGDBusCallMethod(sysbus,
                            &reply,
+                           G_VARIANT_TYPE("(v)"),
                            NULL,
                            VIR_FIREWALL_FIREWALLD_SERVICE,
                            "/org/fedoraproject/FirewallD1",
@@ -138,8 +139,7 @@ virFirewallDGetBackend(void)
     if (!sysbus)
         return -1;
 
-    if (VIR_ALLOC(error) < 0)
-        return -1;
+    error = g_new0(virError, 1);
 
     message = g_variant_new("(ss)",
                             "org.fedoraproject.FirewallD1.config",
@@ -147,6 +147,7 @@ virFirewallDGetBackend(void)
 
     if (virGDBusCallMethod(sysbus,
                            &reply,
+                           G_VARIANT_TYPE("(v)"),
                            error,
                            VIR_FIREWALL_FIREWALLD_SERVICE,
                            "/org/fedoraproject/FirewallD1/config",
@@ -207,6 +208,7 @@ virFirewallDGetZones(char ***zones, size_t *nzones)
 
     if (virGDBusCallMethod(sysbus,
                            &reply,
+                           G_VARIANT_TYPE("(as)"),
                            NULL,
                            VIR_FIREWALL_FIREWALLD_SERVICE,
                            "/org/fedoraproject/FirewallD1",
@@ -215,7 +217,7 @@ virFirewallDGetZones(char ***zones, size_t *nzones)
                            NULL) < 0)
         return -1;
 
-    g_variant_get(reply, "(@as)", array);
+    g_variant_get(reply, "(@as)", &array);
     *zones = g_variant_dup_strv(array, nzones);
 
     return 0;
@@ -286,8 +288,7 @@ virFirewallDApplyRule(virFirewallLayer layer,
         return -1;
     }
 
-    if (VIR_ALLOC(error) < 0)
-        return -1;
+    error = g_new0(virError, 1);
 
     message = g_variant_new("(s@as)",
                             ipv,
@@ -295,6 +296,7 @@ virFirewallDApplyRule(virFirewallLayer layer,
 
     if (virGDBusCallMethod(sysbus,
                            &reply,
+                           G_VARIANT_TYPE("(s)"),
                            error,
                            VIR_FIREWALL_FIREWALLD_SERVICE,
                            "/org/fedoraproject/FirewallD1",
@@ -357,6 +359,7 @@ virFirewallDInterfaceSetZone(const char *iface,
     message = g_variant_new("(ss)", zone, iface);
 
     return virGDBusCallMethod(sysbus,
+                             NULL,
                              NULL,
                              NULL,
                              VIR_FIREWALL_FIREWALLD_SERVICE,

@@ -66,11 +66,12 @@ struct _virNetDaemon {
     int sigwatch;
 #endif /* !WIN32 */
 
-    virHashTablePtr servers;
+    GHashTable *servers;
     virJSONValuePtr srvObject;
 
     virNetDaemonShutdownCallback shutdownPrepareCb;
     virNetDaemonShutdownCallback shutdownWaitCb;
+    virThreadPtr stateStopThread;
     int finishTimer;
     bool quit;
     bool finished;
@@ -86,7 +87,7 @@ static virClassPtr virNetDaemonClass;
 
 static int
 daemonServerClose(void *payload,
-                  const void *key G_GNUC_UNUSED,
+                  const char *key G_GNUC_UNUSED,
                   void *opaque G_GNUC_UNUSED);
 
 static void
@@ -108,6 +109,7 @@ virNetDaemonDispose(void *obj)
 #endif /* !WIN32 */
 
     VIR_FORCE_CLOSE(dmn->autoShutdownInhibitFd);
+    VIR_FREE(dmn->stateStopThread);
 
     virHashFree(dmn->servers);
 
@@ -140,7 +142,7 @@ virNetDaemonNew(void)
     if (!(dmn = virObjectLockableNew(virNetDaemonClass)))
         return NULL;
 
-    if (!(dmn->servers = virHashCreate(5, virObjectFreeHashData)))
+    if (!(dmn->servers = virHashNew(virObjectFreeHashData)))
         goto error;
 
 #ifndef WIN32
@@ -228,7 +230,7 @@ struct collectData {
 
 static int
 collectServers(void *payload,
-               const void *name G_GNUC_UNUSED,
+               const char *name G_GNUC_UNUSED,
                void *opaque)
 {
     virNetServerPtr srv = virObjectRef(payload);
@@ -378,15 +380,6 @@ virNetDaemonNewPostExecRestart(virJSONValuePtr object,
 }
 
 
-static int
-daemonServerCompare(const virHashKeyValuePair *a, const virHashKeyValuePair *b)
-{
-    const char *as = a->key;
-    const char *bs = b->key;
-
-    return strcmp(as, bs);
-}
-
 virJSONValuePtr
 virNetDaemonPreExecRestart(virNetDaemonPtr dmn)
 {
@@ -402,7 +395,7 @@ virNetDaemonPreExecRestart(virNetDaemonPtr dmn)
         goto error;
     }
 
-    if (!(srvArray = virHashGetItems(dmn->servers, daemonServerCompare)))
+    if (!(srvArray = virHashGetItems(dmn->servers, NULL, true)))
         goto error;
 
     for (i = 0; srvArray[i].key; i++) {
@@ -469,7 +462,7 @@ virNetDaemonCallInhibit(virNetDaemonPtr dmn,
 {
     g_autoptr(GVariant) reply = NULL;
     g_autoptr(GUnixFDList) replyFD = NULL;
-    GVariant *message = NULL;
+    g_autoptr(GVariant) message = NULL;
     GDBusConnection *systemBus;
     int fd;
     int rc;
@@ -487,6 +480,7 @@ virNetDaemonCallInhibit(virNetDaemonPtr dmn,
 
     rc = virGDBusCallMethodWithFD(systemBus,
                                   &reply,
+                                  G_VARIANT_TYPE("(h)"),
                                   &replyFD,
                                   NULL,
                                   "org.freedesktop.login1",
@@ -672,8 +666,7 @@ virNetDaemonAddSignalHandler(virNetDaemonPtr dmn,
     if (VIR_EXPAND_N(dmn->signals, dmn->nsignals, 1) < 0)
         goto error;
 
-    if (VIR_ALLOC(sigdata) < 0)
-        goto error;
+    sigdata = g_new0(virNetDaemonSignal, 1);
 
     sigdata->signum = signum;
     sigdata->func = func;
@@ -731,7 +724,7 @@ virNetDaemonAutoShutdownTimer(int timerid G_GNUC_UNUSED,
 
 static int
 daemonServerUpdateServices(void *payload,
-                           const void *key G_GNUC_UNUSED,
+                           const char *key G_GNUC_UNUSED,
                            void *opaque)
 {
     bool *enable = opaque;
@@ -752,7 +745,7 @@ virNetDaemonUpdateServices(virNetDaemonPtr dmn,
 
 static int
 daemonServerProcessClients(void *payload,
-                           const void *key G_GNUC_UNUSED,
+                           const char *key G_GNUC_UNUSED,
                            void *opaque G_GNUC_UNUSED)
 {
     virNetServerPtr srv = payload;
@@ -763,7 +756,7 @@ daemonServerProcessClients(void *payload,
 
 static int
 daemonServerShutdownWait(void *payload,
-                         const void *key G_GNUC_UNUSED,
+                         const char *key G_GNUC_UNUSED,
                          void *opaque G_GNUC_UNUSED)
 {
     virNetServerPtr srv = payload;
@@ -781,6 +774,9 @@ daemonShutdownWait(void *opaque)
     virHashForEach(dmn->servers, daemonServerShutdownWait, NULL);
     if (dmn->shutdownWaitCb && dmn->shutdownWaitCb() < 0)
         goto finish;
+
+    if (dmn->stateStopThread)
+        virThreadJoin(dmn->stateStopThread);
 
     graceful = true;
 
@@ -901,6 +897,18 @@ virNetDaemonRun(virNetDaemonPtr dmn)
 
 
 void
+virNetDaemonSetStateStopWorkerThread(virNetDaemonPtr dmn,
+                                     virThreadPtr *thr)
+{
+    virObjectLock(dmn);
+
+    VIR_DEBUG("Setting state stop worker thread on dmn=%p to thr=%p", dmn, thr);
+    dmn->stateStopThread = g_steal_pointer(thr);
+    virObjectUnlock(dmn);
+}
+
+
+void
 virNetDaemonQuit(virNetDaemonPtr dmn)
 {
     virObjectLock(dmn);
@@ -913,7 +921,7 @@ virNetDaemonQuit(virNetDaemonPtr dmn)
 
 static int
 daemonServerClose(void *payload,
-                  const void *key G_GNUC_UNUSED,
+                  const char *key G_GNUC_UNUSED,
                   void *opaque G_GNUC_UNUSED)
 {
     virNetServerPtr srv = payload;
@@ -924,7 +932,7 @@ daemonServerClose(void *payload,
 
 static int
 daemonServerHasClients(void *payload,
-                       const void *key G_GNUC_UNUSED,
+                       const char *key G_GNUC_UNUSED,
                        void *opaque)
 {
     bool *clients = opaque;

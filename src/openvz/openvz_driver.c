@@ -1215,7 +1215,7 @@ static int openvzDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
     if (!(vm = openvzDomObjFromDomain(driver, dom->uuid)))
         return -1;
 
-    if (nvcpus <= 0) {
+    if (nvcpus == 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("Number of vCPUs should be >= 1"));
         goto cleanup;
@@ -1287,8 +1287,7 @@ static virDrvOpenStatus openvzConnectOpen(virConnectPtr conn,
     /* We now know the URI is definitely for this driver, so beyond
      * here, don't return DECLINED, always use ERROR */
 
-    if (VIR_ALLOC(driver) < 0)
-        return VIR_DRV_OPEN_ERROR;
+    driver = g_new0(struct openvz_driver, 1);
 
     if (!(driver->domains = virDomainObjListNew()))
         goto cleanup;
@@ -2068,9 +2067,9 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
     const char *uri_in = NULL;
     virDomainDefPtr def = NULL;
     virDomainObjPtr vm = NULL;
-    char *my_hostname = NULL;
+    g_autofree char *my_hostname = NULL;
     const char *hostname = NULL;
-    virURIPtr uri = NULL;
+    g_autoptr(virURI) uri = NULL;
     int ret = -1;
 
     if (virTypedParamsValidate(params, nparams, OPENVZ_MIGRATION_PARAMETERS) < 0)
@@ -2114,6 +2113,8 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
                              " but migration requires an FQDN"));
             goto error;
         }
+
+        hostname = my_hostname;
     } else {
         uri = virURIParse(uri_in);
 
@@ -2129,9 +2130,9 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
                            _("missing host in migration URI: %s"),
                            uri_in);
             goto error;
-        } else {
-            hostname = uri->server;
         }
+
+        hostname = uri->server;
     }
 
     *uri_out = g_strdup_printf("ssh://%s", hostname);
@@ -2145,8 +2146,6 @@ openvzDomainMigratePrepare3Params(virConnectPtr dconn,
         virDomainObjListRemove(driver->domains, vm);
 
  done:
-    VIR_FREE(my_hostname);
-    virURIFree(uri);
     virDomainObjEndAPI(&vm);
     return ret;
 }

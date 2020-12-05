@@ -64,6 +64,8 @@ qemuDomainGetSCSIControllerModel(const virDomainDef *def,
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC;
     else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_SCSI))
         return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI;
+    else if (qemuDomainHasBuiltinESP(def))
+        return VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90;
 
     virReportError(VIR_ERR_INTERNAL_ERROR,
                    _("Unable to determine model for SCSI controller idx=%d"),
@@ -406,18 +408,16 @@ qemuDomainAssignS390Addresses(virDomainDefPtr def,
     if (qemuDomainIsS390CCW(def) &&
         virQEMUCapsGet(qemuCaps, QEMU_CAPS_CCW)) {
         if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_CCW))
-            qemuDomainPrimeVfioDeviceAddresses(
-                def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
-        qemuDomainPrimeVirtioDeviceAddresses(
-            def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
+            qemuDomainPrimeVfioDeviceAddresses(def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
+
+        qemuDomainPrimeVirtioDeviceAddresses(def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_CCW);
 
         if (!(addrs = virDomainCCWAddressSetCreateFromDomain(def)))
             goto cleanup;
 
     } else if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VIRTIO_S390)) {
         /* deal with legacy virtio-s390 */
-        qemuDomainPrimeVirtioDeviceAddresses(
-            def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390);
+        qemuDomainPrimeVirtioDeviceAddresses(def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390);
     }
 
     ret = 0;
@@ -637,6 +637,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
             switch ((virDomainControllerModelSCSI) cont->model) {
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DEFAULT:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90:
                 return 0;
 
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI:
@@ -652,6 +653,8 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VMPVSCSI:
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI:
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1078:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DC390:
+            case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_AM53C974:
                 return pciFlags;
 
             case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST:
@@ -678,6 +681,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
         case VIR_DOMAIN_CONTROLLER_TYPE_FDC:
         case VIR_DOMAIN_CONTROLLER_TYPE_CCID:
         case VIR_DOMAIN_CONTROLLER_TYPE_XENBUS:
+        case VIR_DOMAIN_CONTROLLER_TYPE_ISA:
         case VIR_DOMAIN_CONTROLLER_TYPE_LAST:
             return 0;
         }
@@ -2245,6 +2249,11 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
             cont->idx == 0)
             continue;
 
+        /* NCR53C90 SCSI controller is always a built-in device */
+        if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI &&
+            cont->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_NCR53C90)
+            continue;
+
         if (!virDeviceInfoPCIAddressIsWanted(&cont->info))
             continue;
 
@@ -3037,8 +3046,7 @@ qemuDomainUSBAddressAddHubs(virDomainDefPtr def)
               data.count, available_ports, hubs_needed);
 
     for (i = 0; i < hubs_needed; i++) {
-        if (VIR_ALLOC(hub) < 0)
-            return -1;
+        hub = g_new0(virDomainHubDef, 1);
         hub->type = VIR_DOMAIN_HUB_TYPE_USB;
 
         if (VIR_APPEND_ELEMENT(def->hubs, def->nhubs, hub) < 0)
@@ -3055,12 +3063,9 @@ qemuDomainUSBAddressAddHubs(virDomainDefPtr def)
 static virBitmapPtr
 qemuDomainGetMemorySlotMap(const virDomainDef *def)
 {
-    virBitmapPtr ret;
+    virBitmapPtr ret = virBitmapNew(def->mem.memory_slots);
     virDomainMemoryDefPtr mem;
     size_t i;
-
-    if (!(ret = virBitmapNew(def->mem.memory_slots)))
-        return NULL;
 
     for (i = 0; i < def->nmems; i++) {
         mem = def->mems[i];

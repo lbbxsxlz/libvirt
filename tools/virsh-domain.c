@@ -52,6 +52,178 @@
 #include "virenum.h"
 #include "virutil.h"
 
+enum virshAddressType {
+    VIRSH_ADDRESS_TYPE_PCI,
+    VIRSH_ADDRESS_TYPE_SCSI,
+    VIRSH_ADDRESS_TYPE_IDE,
+    VIRSH_ADDRESS_TYPE_CCW,
+    VIRSH_ADDRESS_TYPE_USB,
+    VIRSH_ADDRESS_TYPE_SATA,
+
+    VIRSH_ADDRESS_TYPE_LAST
+};
+
+VIR_ENUM_DECL(virshAddress);
+VIR_ENUM_IMPL(virshAddress,
+              VIRSH_ADDRESS_TYPE_LAST,
+              "pci",
+              "scsi",
+              "ide",
+              "ccw",
+              "usb",
+              "sata");
+
+struct virshAddressPCI {
+    unsigned int domain;
+    unsigned int bus;
+    unsigned int slot;
+    unsigned int function;
+    bool multifunction;
+};
+
+struct virshAddressDrive {
+    unsigned int controller;
+    unsigned int bus;
+    unsigned long long unit;
+};
+
+struct virshAddressCCW {
+    unsigned int cssid;
+    unsigned int ssid;
+    unsigned int devno;
+};
+
+struct virshAddressUSB {
+    unsigned int bus;
+    unsigned int port;
+};
+
+struct virshAddress {
+    int type; /* enum virshAddressType */
+    union {
+        struct virshAddressPCI pci;
+        struct virshAddressDrive drive;
+        struct virshAddressCCW ccw;
+        struct virshAddressUSB usb;
+    } addr;
+};
+
+
+/* pci address pci:0000.00.0x0a.0 (domain:bus:slot:function)
+ * ide disk address: ide:00.00.0 (controller:bus:unit)
+ * scsi disk address: scsi:00.00.0 (controller:bus:unit)
+ * ccw disk address: ccw:0xfe.0.0000 (cssid:ssid:devno)
+ * usb disk address: usb:00.00 (bus:port)
+ * sata disk address: sata:00.00.0 (controller:bus:unit)
+ */
+static int
+virshAddressParse(const char *str,
+                  bool multifunction,
+                  struct virshAddress *addr)
+{
+    g_autofree char *type = g_strdup(str);
+    char *a = strchr(type, ':');
+
+    if (!addr)
+        return -1;
+
+    *a = '\0';
+
+    addr->type = virshAddressTypeFromString(type);
+
+    switch ((enum virshAddressType) addr->type) {
+    case VIRSH_ADDRESS_TYPE_PCI:
+        addr->addr.pci.multifunction = multifunction;
+
+        if (virStrToLong_uip(++a, &a, 16, &addr->addr.pci.domain) < 0 ||
+            virStrToLong_uip(++a, &a, 16, &addr->addr.pci.bus) < 0 ||
+            virStrToLong_uip(++a, &a, 16, &addr->addr.pci.slot) < 0 ||
+            virStrToLong_uip(++a, &a, 16, &addr->addr.pci.function) < 0)
+            return -1;
+        break;
+
+    case VIRSH_ADDRESS_TYPE_SATA:
+    case VIRSH_ADDRESS_TYPE_IDE:
+    case VIRSH_ADDRESS_TYPE_SCSI:
+        if (virStrToLong_uip(++a, &a, 10, &addr->addr.drive.controller) < 0 ||
+            virStrToLong_uip(++a, &a, 10, &addr->addr.drive.bus) < 0 ||
+            virStrToLong_ullp(++a, &a, 10, &addr->addr.drive.unit) < 0)
+            return -1;
+        break;
+
+    case VIRSH_ADDRESS_TYPE_CCW:
+        if (virStrToLong_uip(++a, &a, 16, &addr->addr.ccw.cssid) < 0 ||
+            virStrToLong_uip(++a, &a, 16, &addr->addr.ccw.ssid) < 0 ||
+            virStrToLong_uip(++a, &a, 16, &addr->addr.ccw.devno) < 0)
+            return -1;
+        break;
+
+    case VIRSH_ADDRESS_TYPE_USB:
+        if (virStrToLong_uip(++a, &a, 10, &addr->addr.usb.bus) < 0 ||
+            virStrToLong_uip(++a, &a, 10, &addr->addr.usb.port) < 0)
+            return -1;
+        break;
+
+    case VIRSH_ADDRESS_TYPE_LAST:
+    default:
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static void
+virshAddressFormat(virBufferPtr buf,
+                   struct virshAddress *addr)
+{
+    switch ((enum virshAddressType) addr->type) {
+    case VIRSH_ADDRESS_TYPE_PCI:
+        virBufferAsprintf(buf,
+                          "<address type='pci' domain='0x%04x' bus='0x%02x' slot='0x%02x' function='0x%0x'",
+                          addr->addr.pci.domain,
+                          addr->addr.pci.bus,
+                          addr->addr.pci.slot,
+                          addr->addr.pci.function);
+
+        if (addr->addr.pci.multifunction)
+            virBufferAddLit(buf, " multifunction='on'");
+
+        virBufferAddLit(buf, "/>\n");
+        break;
+
+    case VIRSH_ADDRESS_TYPE_SATA:
+    case VIRSH_ADDRESS_TYPE_IDE:
+    case VIRSH_ADDRESS_TYPE_SCSI:
+        virBufferAsprintf(buf,
+                          "<address type='drive' controller='%u' bus='%u' unit='%llu'/>\n",
+                          addr->addr.drive.controller,
+                          addr->addr.drive.bus,
+                          addr->addr.drive.unit);
+        break;
+
+    case VIRSH_ADDRESS_TYPE_CCW:
+        virBufferAsprintf(buf,
+                          "<address type='ccw' cssid='0x%02x' ssid='0x%01x' devno='0x%04x'/>\n",
+                          addr->addr.ccw.cssid,
+                          addr->addr.ccw.ssid,
+                          addr->addr.ccw.devno);
+        break;
+
+    case VIRSH_ADDRESS_TYPE_USB:
+        virBufferAsprintf(buf,
+                          "<address type='usb' bus='%u' port='%u'/>\n",
+                          addr->addr.usb.bus,
+                          addr->addr.usb.port);
+        break;
+
+    case VIRSH_ADDRESS_TYPE_LAST:
+    default:
+        return;
+    }
+}
+
+
 #define VIRSH_COMMON_OPT_DOMAIN_PERSISTENT \
     {.name = "persistent", \
      .type = VSH_OT_BOOL, \
@@ -222,7 +394,7 @@ static const vshCmdOptDef opts_attach_disk[] = {
     {.name = "source",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ | VSH_OFLAG_EMPTY_OK,
-     .help = N_("source of disk device")
+     .help = N_("source of disk device or name of network disk")
     },
     {.name = "target",
      .type = VSH_OT_DATA,
@@ -268,7 +440,7 @@ static const vshCmdOptDef opts_attach_disk[] = {
     },
     {.name = "sourcetype",
      .type = VSH_OT_STRING,
-     .help = N_("type of source (block|file)")
+     .help = N_("type of source (block|file|network)")
     },
     {.name = "serial",
      .type = VSH_OT_STRING,
@@ -298,6 +470,22 @@ static const vshCmdOptDef opts_attach_disk[] = {
      .type = VSH_OT_BOOL,
      .help = N_("print XML document rather than attach the disk")
     },
+    {.name = "source-protocol",
+     .type = VSH_OT_STRING,
+     .help = N_("protocol used by disk device source")
+    },
+    {.name = "source-host-name",
+     .type = VSH_OT_STRING,
+     .help = N_("host name for source of disk device")
+    },
+    {.name = "source-host-transport",
+     .type = VSH_OT_STRING,
+     .help = N_("host transport for source of disk device")
+    },
+    {.name = "source-host-socket",
+     .type = VSH_OT_STRING,
+     .help = N_("host socket for source of disk device")
+    },
     VIRSH_COMMON_OPT_DOMAIN_PERSISTENT,
     VIRSH_COMMON_OPT_DOMAIN_CONFIG,
     VIRSH_COMMON_OPT_DOMAIN_LIVE,
@@ -305,285 +493,118 @@ static const vshCmdOptDef opts_attach_disk[] = {
     {.name = NULL}
 };
 
-enum {
-    DISK_ADDR_TYPE_INVALID,
-    DISK_ADDR_TYPE_PCI,
-    DISK_ADDR_TYPE_SCSI,
-    DISK_ADDR_TYPE_IDE,
-    DISK_ADDR_TYPE_CCW,
-    DISK_ADDR_TYPE_USB,
-    DISK_ADDR_TYPE_SATA,
-};
 
-struct PCIAddress {
-    unsigned int domain;
-    unsigned int bus;
-    unsigned int slot;
-    unsigned int function;
-};
-
-struct SCSIAddress {
-    unsigned int controller;
-    unsigned int bus;
-    unsigned long long unit;
-};
-
-struct IDEAddress {
-    unsigned int controller;
-    unsigned int bus;
-    unsigned int unit;
-};
-
-struct CCWAddress {
-    unsigned int cssid;
-    unsigned int ssid;
-    unsigned int devno;
-};
-
-struct USBAddress {
-    unsigned int bus;
-    unsigned int port;
-};
-
-struct SATAAddress {
-    unsigned int controller;
-    unsigned int bus;
-    unsigned long long unit;
-};
-
-struct DiskAddress {
-    int type;
-    union {
-        struct PCIAddress pci;
-        struct SCSIAddress scsi;
-        struct IDEAddress ide;
-        struct CCWAddress ccw;
-        struct USBAddress usb;
-        struct SATAAddress sata;
-    } addr;
-};
-
-static int str2PCIAddress(const char *str, struct PCIAddress *pciAddr)
+static int
+cmdAttachDiskFormatAddress(vshControl *ctl,
+                           virBufferPtr buf,
+                           const char *straddr,
+                           const char *target,
+                           bool multifunction)
 {
-    char *domain, *bus, *slot, *function;
+    struct virshAddress diskAddr;
 
-    if (!pciAddr)
+    if (virshAddressParse(straddr, multifunction, &diskAddr) < 0) {
+        vshError(ctl, _("Invalid address."));
         return -1;
-    if (!str)
-        return -1;
-
-    domain = (char *)str;
-
-    if (virStrToLong_uip(domain, &bus, 16, &pciAddr->domain) != 0)
-        return -1;
-
-    bus++;
-    if (virStrToLong_uip(bus, &slot, 16, &pciAddr->bus) != 0)
-        return -1;
-
-    slot++;
-    if (virStrToLong_uip(slot, &function, 16, &pciAddr->slot) != 0)
-        return -1;
-
-    function++;
-    if (virStrToLong_uip(function, NULL, 16, &pciAddr->function) != 0)
-        return -1;
-
-    return 0;
-}
-
-static int str2SCSIAddress(const char *str, struct SCSIAddress *scsiAddr)
-{
-    char *controller, *bus, *unit;
-
-    if (!scsiAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    controller = (char *)str;
-
-    if (virStrToLong_uip(controller, &bus, 10, &scsiAddr->controller) != 0)
-        return -1;
-
-    bus++;
-    if (virStrToLong_uip(bus, &unit, 10, &scsiAddr->bus) != 0)
-        return -1;
-
-    unit++;
-    if (virStrToLong_ullp(unit, NULL, 10, &scsiAddr->unit) != 0)
-        return -1;
-
-    return 0;
-}
-
-static int str2IDEAddress(const char *str, struct IDEAddress *ideAddr)
-{
-    char *controller, *bus, *unit;
-
-    if (!ideAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    controller = (char *)str;
-
-    if (virStrToLong_uip(controller, &bus, 10, &ideAddr->controller) != 0)
-        return -1;
-
-    bus++;
-    if (virStrToLong_uip(bus, &unit, 10, &ideAddr->bus) != 0)
-        return -1;
-
-    unit++;
-    if (virStrToLong_uip(unit, NULL, 10, &ideAddr->unit) != 0)
-        return -1;
-
-    return 0;
-}
-
-static int str2CCWAddress(const char *str, struct CCWAddress *ccwAddr)
-{
-    char *cssid, *ssid, *devno;
-
-    if (!ccwAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    cssid = (char *)str;
-
-    if (virStrToLong_uip(cssid, &ssid, 16, &ccwAddr->cssid) != 0)
-        return -1;
-
-    ssid++;
-    if (virStrToLong_uip(ssid, &devno, 16, &ccwAddr->ssid) != 0)
-        return -1;
-
-    devno++;
-    if (virStrToLong_uip(devno, NULL, 16, &ccwAddr->devno) != 0)
-        return -1;
-
-    return 0;
-}
-
-static int str2USBAddress(const char *str, struct USBAddress *usbAddr)
-{
-    char *bus, *port;
-
-    if (!usbAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    bus = (char *)str;
-
-    if (virStrToLong_uip(bus, &port, 10, &usbAddr->bus) != 0)
-        return -1;
-
-    port++;
-    if (virStrToLong_uip(port, NULL, 10, &usbAddr->port) != 0)
-        return -1;
-
-    return 0;
-}
-
-static int str2SATAAddress(const char *str, struct SATAAddress *sataAddr)
-{
-    char *controller, *bus, *unit;
-
-    if (!sataAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    controller = (char *)str;
-
-    if (virStrToLong_uip(controller, &bus, 10, &sataAddr->controller) != 0)
-        return -1;
-
-    bus++;
-    if (virStrToLong_uip(bus, &unit, 10, &sataAddr->bus) != 0)
-        return -1;
-
-    unit++;
-    if (virStrToLong_ullp(unit, NULL, 10, &sataAddr->unit) != 0)
-        return -1;
-
-    return 0;
-}
-
-/* pci address pci:0000.00.0x0a.0 (domain:bus:slot:function)
- * ide disk address: ide:00.00.0 (controller:bus:unit)
- * scsi disk address: scsi:00.00.0 (controller:bus:unit)
- * ccw disk address: ccw:0xfe.0.0000 (cssid:ssid:devno)
- * usb disk address: usb:00.00 (bus:port)
- * sata disk address: sata:00.00.0 (controller:bus:unit)
- */
-
-static int str2DiskAddress(const char *str, struct DiskAddress *diskAddr)
-{
-    char *type, *addr;
-
-    if (!diskAddr)
-        return -1;
-    if (!str)
-        return -1;
-
-    type = (char *)str;
-    addr = strchr(type, ':');
-    if (!addr)
-        return -1;
-
-    if (STREQLEN(type, "pci", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_PCI;
-        return str2PCIAddress(addr + 1, &diskAddr->addr.pci);
-    } else if (STREQLEN(type, "scsi", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_SCSI;
-        return str2SCSIAddress(addr + 1, &diskAddr->addr.scsi);
-    } else if (STREQLEN(type, "ide", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_IDE;
-        return str2IDEAddress(addr + 1, &diskAddr->addr.ide);
-    } else if (STREQLEN(type, "ccw", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_CCW;
-        return str2CCWAddress(addr + 1, &diskAddr->addr.ccw);
-    } else if (STREQLEN(type, "usb", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_USB;
-        return str2USBAddress(addr + 1, &diskAddr->addr.usb);
-    } else if (STREQLEN(type, "sata", addr - type)) {
-        diskAddr->type = DISK_ADDR_TYPE_SATA;
-        return str2SATAAddress(addr + 1, &diskAddr->addr.sata);
     }
 
-    return -1;
+    if (STRPREFIX((const char *)target, "vd")) {
+        if (diskAddr.type != VIRSH_ADDRESS_TYPE_PCI &&
+            diskAddr.type != VIRSH_ADDRESS_TYPE_CCW) {
+            vshError(ctl, "%s",
+                     _("expecting a pci:0000.00.00.00 or ccw:00.0.0000 address."));
+            return -1;
+        }
+    } else if (STRPREFIX((const char *)target, "sd")) {
+        if (diskAddr.type != VIRSH_ADDRESS_TYPE_SCSI &&
+            diskAddr.type != VIRSH_ADDRESS_TYPE_USB &&
+            diskAddr.type != VIRSH_ADDRESS_TYPE_SATA) {
+            vshError(ctl, "%s",
+                     _("expecting a scsi:00.00.00 or usb:00.00 or sata:00.00.00 address."));
+            return -1;
+        }
+    } else if (STRPREFIX((const char *)target, "hd")) {
+        if (diskAddr.type != VIRSH_ADDRESS_TYPE_IDE) {
+            vshError(ctl, "%s", _("expecting an ide:00.00.00 address."));
+            return -1;
+        }
+    }
+
+    virshAddressFormat(buf, &diskAddr);
+    return 0;
 }
+
+
+enum virshAttachDiskSourceType {
+    VIRSH_ATTACH_DISK_SOURCE_TYPE_NONE,
+    VIRSH_ATTACH_DISK_SOURCE_TYPE_FILE,
+    VIRSH_ATTACH_DISK_SOURCE_TYPE_BLOCK,
+    VIRSH_ATTACH_DISK_SOURCE_TYPE_NETWORK,
+
+    VIRSH_ATTACH_DISK_SOURCE_TYPE_LAST
+};
+
+VIR_ENUM_DECL(virshAttachDiskSource);
+VIR_ENUM_IMPL(virshAttachDiskSource,
+              VIRSH_ATTACH_DISK_SOURCE_TYPE_LAST,
+              "",
+              "file",
+              "block",
+              "network");
+
 
 static bool
 cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
 {
-    virDomainPtr dom = NULL;
-    const char *source = NULL, *target = NULL, *driver = NULL,
-                *subdriver = NULL, *type = NULL, *mode = NULL,
-                *iothread = NULL, *cache = NULL, *io = NULL,
-                *serial = NULL, *straddr = NULL, *wwn = NULL,
-                *targetbus = NULL, *alias = NULL;
-    struct DiskAddress diskAddr;
-    bool isFile = false, functionReturn = false;
+    g_autoptr(virshDomain) dom = NULL;
+    const char *source = NULL;
+    const char *target = NULL;
+    const char *driver = NULL;
+    const char *subdriver = NULL;
+    const char *device = NULL;
+    const char *mode = NULL;
+    const char *iothread = NULL;
+    const char *cache = NULL;
+    const char *io = NULL;
+    const char *serial = NULL;
+    const char *straddr = NULL;
+    const char *wwn = NULL;
+    const char *targetbus = NULL;
+    const char *alias = NULL;
+    const char *source_protocol = NULL;
+    const char *host_name = NULL;
+    const char *host_transport = NULL;
+    const char *host_socket = NULL;
     int ret;
     unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
     const char *stype = NULL;
+    int type = VIR_STORAGE_TYPE_NONE;
     g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
-    char *xml = NULL;
+    g_auto(virBuffer) diskAttrBuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) diskChildBuf = VIR_BUFFER_INIT_CHILD(&buf);
+    g_auto(virBuffer) driverAttrBuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) sourceAttrBuf = VIR_BUFFER_INITIALIZER;
+    g_auto(virBuffer) sourceChildBuf = VIR_BUFFER_INIT_CHILD(&diskChildBuf);
+    g_auto(virBuffer) hostAttrBuf = VIR_BUFFER_INITIALIZER;
+    g_autofree char *xml = NULL;
     struct stat st;
     bool current = vshCommandOptBool(cmd, "current");
     bool config = vshCommandOptBool(cmd, "config");
     bool live = vshCommandOptBool(cmd, "live");
     bool persistent = vshCommandOptBool(cmd, "persistent");
+    bool multifunction = vshCommandOptBool(cmd, "multifunction");
 
     VSH_EXCLUSIVE_OPTIONS_VAR(persistent, current);
 
     VSH_EXCLUSIVE_OPTIONS_VAR(current, live);
     VSH_EXCLUSIVE_OPTIONS_VAR(current, config);
+
+    VSH_REQUIRE_OPTION("source-host-name", "source-protocol");
+    VSH_REQUIRE_OPTION("source-host-transport", "source-protocol");
+    VSH_REQUIRE_OPTION("source-host-socket", "source-protocol");
+    VSH_REQUIRE_OPTION("source-host-socket", "source-host-transport");
+
+    VSH_EXCLUSIVE_OPTIONS("source-host-name", "source-host-socket");
 
     if (config || persistent)
         flags |= VIR_DOMAIN_AFFECT_CONFIG;
@@ -594,7 +615,7 @@ cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
         vshCommandOptStringReq(ctl, cmd, "target", &target) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "driver", &driver) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "subdriver", &subdriver) < 0 ||
-        vshCommandOptStringReq(ctl, cmd, "type", &type) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "type", &device) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "mode", &mode) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "iothread", &iothread) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "cache", &cache) < 0 ||
@@ -604,157 +625,131 @@ cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
         vshCommandOptStringReq(ctl, cmd, "address", &straddr) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "targetbus", &targetbus) < 0 ||
         vshCommandOptStringReq(ctl, cmd, "alias", &alias) < 0 ||
-        vshCommandOptStringReq(ctl, cmd, "sourcetype", &stype) < 0)
-        goto cleanup;
+        vshCommandOptStringReq(ctl, cmd, "sourcetype", &stype) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "source-protocol", &source_protocol) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "source-host-name", &host_name) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "source-host-transport", &host_transport) < 0 ||
+        vshCommandOptStringReq(ctl, cmd, "source-host-socket", &host_socket) < 0)
+        return false;
 
-    if (!stype) {
-        if (driver && (STREQ(driver, "file") || STREQ(driver, "tap"))) {
-            isFile = true;
-        } else {
-            if (source && !stat(source, &st))
-                isFile = S_ISREG(st.st_mode) ? true : false;
-        }
-    } else if (STREQ(stype, "file")) {
-        isFile = true;
-    } else if (STRNEQ(stype, "block")) {
+    if (stype &&
+        (type = virshAttachDiskSourceTypeFromString(stype)) < 0) {
         vshError(ctl, _("Unknown source type: '%s'"), stype);
-        goto cleanup;
+        return false;
+    }
+
+    if (type == VIRSH_ATTACH_DISK_SOURCE_TYPE_NONE) {
+        if (source_protocol) {
+            type = VIRSH_ATTACH_DISK_SOURCE_TYPE_NETWORK;
+        } else  if (STRNEQ_NULLABLE(driver, "file") &&
+                    STRNEQ_NULLABLE(driver, "tap") &&
+                    source &&
+                    stat(source, &st) == 0 &&
+                    S_ISBLK(st.st_mode)) {
+            type = VIRSH_ATTACH_DISK_SOURCE_TYPE_BLOCK;
+        } else {
+            type = VIRSH_ATTACH_DISK_SOURCE_TYPE_FILE;
+        }
+    }
+
+    if ((type == VIRSH_ATTACH_DISK_SOURCE_TYPE_NETWORK) != !!source_protocol) {
+        vshError(ctl, _("--source-protocol option requires --sourcetype network"));
+        return false;
     }
 
     if (mode) {
         if (STRNEQ(mode, "readonly") && STRNEQ(mode, "shareable")) {
             vshError(ctl, _("No support for %s in command 'attach-disk'"),
                      mode);
-            goto cleanup;
+            return false;
         }
     }
 
     if (wwn && !virValidateWWN(wwn))
-        goto cleanup;
+        return false;
 
-    /* Make XML of disk */
-    virBufferAsprintf(&buf, "<disk type='%s'",
-                      isFile ? "file" : "block");
-    if (type)
-        virBufferAsprintf(&buf, " device='%s'", type);
+    virBufferAsprintf(&diskAttrBuf, " type='%s'", virshAttachDiskSourceTypeToString(type));
+    virBufferEscapeString(&diskAttrBuf, " device='%s'", device);
     if (vshCommandOptBool(cmd, "rawio"))
-        virBufferAddLit(&buf, " rawio='yes'");
-    virBufferAddLit(&buf, ">\n");
-    virBufferAdjustIndent(&buf, 2);
+        virBufferAddLit(&diskAttrBuf, " rawio='yes'");
 
-    if (driver || subdriver || iothread || cache || io) {
-        virBufferAddLit(&buf, "<driver");
+    virBufferEscapeString(&driverAttrBuf, " name='%s'", driver);
+    virBufferEscapeString(&driverAttrBuf, " type='%s'", subdriver);
+    virBufferEscapeString(&driverAttrBuf, " iothread='%s'", iothread);
+    virBufferEscapeString(&driverAttrBuf, " cache='%s'", cache);
+    virBufferEscapeString(&driverAttrBuf, " io='%s'", io);
 
-        if (driver)
-            virBufferAsprintf(&buf, " name='%s'", driver);
-        if (subdriver)
-            virBufferAsprintf(&buf, " type='%s'", subdriver);
-        if (iothread)
-            virBufferAsprintf(&buf, " iothread='%s'", iothread);
-        if (cache)
-            virBufferAsprintf(&buf, " cache='%s'", cache);
-        if (io)
-            virBufferAsprintf(&buf, " io='%s'", io);
+    virXMLFormatElement(&diskChildBuf, "driver", &driverAttrBuf, NULL);
 
-        virBufferAddLit(&buf, "/>\n");
+    switch ((enum virshAttachDiskSourceType) type) {
+    case VIRSH_ATTACH_DISK_SOURCE_TYPE_FILE:
+        virBufferEscapeString(&sourceAttrBuf, " file='%s'", source);
+        break;
+
+    case VIRSH_ATTACH_DISK_SOURCE_TYPE_BLOCK:
+        virBufferEscapeString(&sourceAttrBuf, " dev='%s'", source);
+        break;
+
+    case VIRSH_ATTACH_DISK_SOURCE_TYPE_NETWORK:
+        virBufferEscapeString(&sourceAttrBuf, " protocol='%s'", source_protocol);
+        virBufferEscapeString(&sourceAttrBuf, " name='%s'", source);
+
+        virBufferEscapeString(&hostAttrBuf, " transport='%s'", host_transport);
+        virBufferEscapeString(&hostAttrBuf, " socket='%s'", host_socket);
+
+        if (host_name) {
+            g_autofree char *host_name_copy = g_strdup(host_name);
+            char *host_port = strchr(host_name_copy, ':');
+
+            if (host_port) {
+                *host_port = '\0';
+                host_port++;
+            }
+
+            virBufferEscapeString(&hostAttrBuf, " name='%s'", host_name_copy);
+            virBufferEscapeString(&hostAttrBuf, " port='%s'", host_port);
+        }
+        virXMLFormatElement(&sourceChildBuf, "host", &hostAttrBuf, NULL);
+        break;
+
+    case VIRSH_ATTACH_DISK_SOURCE_TYPE_NONE:
+    case VIRSH_ATTACH_DISK_SOURCE_TYPE_LAST:
+        break;
     }
+    virXMLFormatElement(&diskChildBuf, "source", &sourceAttrBuf, &sourceChildBuf);
 
-    if (source)
-        virBufferAsprintf(&buf, "<source %s='%s'/>\n",
-                          isFile ? "file" : "dev", source);
-    virBufferAsprintf(&buf, "<target dev='%s'", target);
+    virBufferAsprintf(&diskChildBuf, "<target dev='%s'", target);
     if (targetbus)
-        virBufferAsprintf(&buf, " bus='%s'", targetbus);
-    virBufferAddLit(&buf, "/>\n");
+        virBufferAsprintf(&diskChildBuf, " bus='%s'", targetbus);
+    virBufferAddLit(&diskChildBuf, "/>\n");
 
     if (mode)
-        virBufferAsprintf(&buf, "<%s/>\n", mode);
+        virBufferAsprintf(&diskChildBuf, "<%s/>\n", mode);
 
     if (serial)
-        virBufferAsprintf(&buf, "<serial>%s</serial>\n", serial);
+        virBufferAsprintf(&diskChildBuf, "<serial>%s</serial>\n", serial);
 
     if (alias)
-        virBufferAsprintf(&buf, "<alias name='%s'/>\n", alias);
+        virBufferAsprintf(&diskChildBuf, "<alias name='%s'/>\n", alias);
 
     if (wwn)
-        virBufferAsprintf(&buf, "<wwn>%s</wwn>\n", wwn);
+        virBufferAsprintf(&diskChildBuf, "<wwn>%s</wwn>\n", wwn);
 
-    if (straddr) {
-        if (str2DiskAddress(straddr, &diskAddr) != 0) {
-            vshError(ctl, _("Invalid address."));
-            goto cleanup;
-        }
+    if (straddr &&
+        cmdAttachDiskFormatAddress(ctl, &diskChildBuf, straddr, target, multifunction) < 0)
+        return false;
 
-        if (STRPREFIX((const char *)target, "vd")) {
-            if (diskAddr.type == DISK_ADDR_TYPE_PCI) {
-                virBufferAsprintf(&buf,
-                                  "<address type='pci' domain='0x%04x'"
-                                  " bus ='0x%02x' slot='0x%02x' function='0x%0x'",
-                                  diskAddr.addr.pci.domain, diskAddr.addr.pci.bus,
-                                  diskAddr.addr.pci.slot, diskAddr.addr.pci.function);
-                if (vshCommandOptBool(cmd, "multifunction"))
-                    virBufferAddLit(&buf, " multifunction='on'");
-                virBufferAddLit(&buf, "/>\n");
-            } else if (diskAddr.type == DISK_ADDR_TYPE_CCW) {
-                virBufferAsprintf(&buf,
-                                  "<address type='ccw' cssid='0x%02x'"
-                                  " ssid='0x%01x' devno='0x%04x' />\n",
-                                  diskAddr.addr.ccw.cssid, diskAddr.addr.ccw.ssid,
-                                  diskAddr.addr.ccw.devno);
-            } else {
-                vshError(ctl, "%s",
-                         _("expecting a pci:0000.00.00.00 or ccw:00.0.0000 address."));
-                goto cleanup;
-            }
-        } else if (STRPREFIX((const char *)target, "sd")) {
-            if (diskAddr.type == DISK_ADDR_TYPE_SCSI) {
-                virBufferAsprintf(&buf,
-                                  "<address type='drive' controller='%u'"
-                                  " bus='%u' unit='%llu' />\n",
-                                  diskAddr.addr.scsi.controller, diskAddr.addr.scsi.bus,
-                                  diskAddr.addr.scsi.unit);
-            } else if (diskAddr.type == DISK_ADDR_TYPE_USB) {
-                virBufferAsprintf(&buf,
-                                  "<address type='usb' bus='%u' port='%u' />\n",
-                                  diskAddr.addr.usb.bus, diskAddr.addr.usb.port);
-            } else if (diskAddr.type == DISK_ADDR_TYPE_SATA) {
-                virBufferAsprintf(&buf,
-                                  "<address type='drive' controller='%u'"
-                                  " bus='%u' unit='%llu' />\n",
-                                  diskAddr.addr.sata.controller, diskAddr.addr.sata.bus,
-                                  diskAddr.addr.sata.unit);
-            } else {
-                vshError(ctl, "%s",
-                _("expecting a scsi:00.00.00 or usb:00.00 or sata:00.00.00 address."));
-                goto cleanup;
-            }
-        } else if (STRPREFIX((const char *)target, "hd")) {
-            if (diskAddr.type == DISK_ADDR_TYPE_IDE) {
-                virBufferAsprintf(&buf,
-                                  "<address type='drive' controller='%u'"
-                                  " bus='%u' unit='%u' />\n",
-                                  diskAddr.addr.ide.controller, diskAddr.addr.ide.bus,
-                                  diskAddr.addr.ide.unit);
-            } else {
-                vshError(ctl, "%s", _("expecting an ide:00.00.00 address."));
-                goto cleanup;
-            }
-        }
-    }
-
-    virBufferAdjustIndent(&buf, -2);
-    virBufferAddLit(&buf, "</disk>\n");
+    virXMLFormatElement(&buf, "disk", &diskAttrBuf, &diskChildBuf);
 
     xml = virBufferContentAndReset(&buf);
 
     if (vshCommandOptBool(cmd, "print-xml")) {
         vshPrint(ctl, "%s", xml);
-        functionReturn = true;
-        goto cleanup;
+        return true;
     }
 
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
-        goto cleanup;
+        return false;
 
     if (persistent &&
         virDomainIsActive(dom) == 1)
@@ -765,17 +760,14 @@ cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
     else
         ret = virDomainAttachDevice(dom, xml);
 
-    if (ret != 0) {
+    if (ret < 0) {
         vshError(ctl, "%s", _("Failed to attach disk"));
-    } else {
-        vshPrintExtra(ctl, "%s", _("Disk attached successfully\n"));
-        functionReturn = true;
+        return false;
     }
 
- cleanup:
-    VIR_FREE(xml);
-    virshDomainFree(dom);
-    return functionReturn;
+
+    vshPrintExtra(ctl, "%s", _("Disk attached successfully\n"));
+    return true;
 }
 
 /*
@@ -981,20 +973,18 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
         break;
     case VIR_DOMAIN_NET_TYPE_HOSTDEV:
     {
-        struct PCIAddress pciAddr = {0, 0, 0, 0};
+        g_autofree char *pciaddrstr = g_strdup_printf("pci:%s", source);
+        struct virshAddress addr = { 0 };
 
-        if (str2PCIAddress(source, &pciAddr) < 0) {
-            vshError(ctl, _("cannot parse pci address '%s' for network "
-                            "interface"), source);
+        if (virshAddressParse(pciaddrstr, false, &addr) < 0) {
+            vshError(ctl, _("cannot parse pci address '%s' for network interface"),
+                     source);
             goto cleanup;
         }
 
         virBufferAddLit(&buf, "<source>\n");
         virBufferAdjustIndent(&buf, 2);
-        virBufferAsprintf(&buf, "<address type='pci' domain='0x%04x'"
-                          " bus='0x%02x' slot='0x%02x' function='0x%d'/>\n",
-                          pciAddr.domain, pciAddr.bus,
-                          pciAddr.slot, pciAddr.function);
+        virshAddressFormat(&buf, &addr);
         virBufferAdjustIndent(&buf, -2);
         virBufferAddLit(&buf, "</source>\n");
         break;
@@ -1007,6 +997,7 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
     case VIR_DOMAIN_NET_TYPE_CLIENT:
     case VIR_DOMAIN_NET_TYPE_MCAST:
     case VIR_DOMAIN_NET_TYPE_UDP:
+    case VIR_DOMAIN_NET_TYPE_VDPA:
     case VIR_DOMAIN_NET_TYPE_INTERNAL:
     case VIR_DOMAIN_NET_TYPE_LAST:
         vshError(ctl, _("No support for %s in command 'attach-interface'"),
@@ -1431,7 +1422,7 @@ cmdBlkdeviotune(vshControl *ctl, const vshCmd *cmd)
             goto cleanup;
         }
 
-        params = vshCalloc(ctl, nparams, sizeof(*params));
+        params = g_new0(virTypedParameter, nparams);
 
         if (virDomainGetBlockIoTune(dom, disk, params, &nparams, flags) != 0) {
             vshError(ctl, "%s",
@@ -1629,7 +1620,7 @@ cmdBlkiotune(vshControl * ctl, const vshCmd * cmd)
         }
 
         /* now go get all the blkio parameters */
-        params = vshCalloc(ctl, nparams, sizeof(*params));
+        params = g_new0(virTypedParameter, nparams);
         if (virDomainGetBlkioParameters(dom, params, &nparams, flags) != 0) {
             vshError(ctl, "%s", _("Unable to get blkio parameters"));
             goto cleanup;
@@ -1762,8 +1753,7 @@ virshBlockJobWaitInit(vshControl *ctl,
     virshBlockJobWaitDataPtr ret;
     virshControlPtr priv = ctl->privData;
 
-    if (VIR_ALLOC(ret) < 0)
-        return NULL;
+    ret = g_new0(virshBlockJobWaitData, 1);
 
     ret->ctl = ctl;
     ret->dom = dom;
@@ -2373,7 +2363,7 @@ cmdBlockcopy(vshControl *ctl, const vshCmd *cmd)
         transientjob) {
         /* New API */
         if (bandwidth || granularity || buf_size) {
-            params = vshCalloc(ctl, 3, sizeof(*params));
+            params = g_new0(virTypedParameter, 3);
             if (bandwidth) {
                 if (!bytes) {
                     /* bandwidth is ulong MiB/s, but the typed parameter is
@@ -2960,6 +2950,7 @@ static const vshCmdOptDef opts_console[] = {
     VIRSH_COMMON_OPT_DOMAIN_FULL(VIR_CONNECT_LIST_DOMAINS_ACTIVE),
     {.name = "devname", /* sc_prohibit_devname */
      .type = VSH_OT_STRING,
+     .completer = virshDomainConsoleCompleter,
      .help = N_("character device name")
     },
     {.name = "force",
@@ -3376,7 +3367,7 @@ cmdDomIftune(vshControl *ctl, const vshCmd *cmd)
         }
 
         /* get all interface parameters */
-        params = vshCalloc(ctl, nparams, sizeof(*params));
+        params = g_new0(virTypedParameter, nparams);
         if (virDomainGetInterfaceParameters(dom, device, params, &nparams, flags) != 0) {
             vshError(ctl, "%s", _("Unable to get interface parameters"));
             goto cleanup;
@@ -5244,7 +5235,7 @@ cmdSchedinfo(vshControl *ctl, const vshCmd *cmd)
     }
 
     if (nparams) {
-        params = vshMalloc(ctl, sizeof(*params) * nparams);
+        params = g_new0(virTypedParameter, nparams);
 
         memset(params, 0, sizeof(*params) * nparams);
         if (flags || current) {
@@ -5716,11 +5707,13 @@ static const vshCmdOptDef opts_setLifecycleAction[] = {
     {.name = "type",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshDomainLifecycleCompleter,
      .help = N_("lifecycle type to modify")
     },
     {.name = "action",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshDomainLifecycleActionCompleter,
      .help = N_("lifecycle action to set")
     },
     VIRSH_COMMON_OPT_DOMAIN_CONFIG,
@@ -6841,8 +6834,7 @@ virshDomainGetVcpuBitmap(vshControl *ctl,
     if (curvcpus == 0)
         curvcpus = maxvcpus;
 
-    if (!(ret = virBitmapNew(maxvcpus)))
-        goto cleanup;
+    ret = virBitmapNew(maxvcpus);
 
     if ((nnodes = virXPathNodeSet("/domain/vcpus/vcpu", ctxt, &nodes)) <= 0) {
         /* if the specific vcpu state is missing provide a fallback */
@@ -6896,7 +6888,7 @@ virshVcpuinfoInactive(vshControl *ctl,
         return false;
 
     cpumaplen = VIR_CPU_MAPLEN(maxcpu);
-    cpumaps = vshMalloc(ctl, virBitmapSize(vcpus) * cpumaplen);
+    cpumaps = g_new0(unsigned char, virBitmapSize(vcpus) * cpumaplen);
 
     if (virDomainGetVcpuPinInfo(dom, virBitmapSize(vcpus),
                                 cpumaps, cpumaplen,
@@ -6945,9 +6937,9 @@ cmdVcpuinfo(vshControl *ctl, const vshCmd *cmd)
     if (virDomainGetInfo(dom, &info) != 0)
         return false;
 
-    cpuinfo = vshMalloc(ctl, sizeof(virVcpuInfo)*info.nrVirtCpu);
+    cpuinfo = g_new0(virVcpuInfo, info.nrVirtCpu);
     cpumaplen = VIR_CPU_MAPLEN(maxcpu);
-    cpumaps = vshMalloc(ctl, info.nrVirtCpu * cpumaplen);
+    cpumaps = g_new0(unsigned char, info.nrVirtCpu * cpumaplen);
 
     if ((ncpus = virDomainGetVcpus(dom,
                                    cpuinfo, info.nrVirtCpu,
@@ -7077,7 +7069,7 @@ virshVcpuPinQuery(vshControl *ctl,
     }
 
     cpumaplen = VIR_CPU_MAPLEN(maxcpu);
-    cpumap = vshMalloc(ctl, ncpus * cpumaplen);
+    cpumap = g_new0(unsigned char, ncpus * cpumaplen);
     if ((ncpus = virDomainGetVcpuPinInfo(dom, ncpus, cpumap,
                                          cpumaplen, flags)) >= 0) {
         table = vshTableNew(_("VCPU"), _("CPU Affinity"), NULL);
@@ -7119,8 +7111,7 @@ virshParseCPUList(vshControl *ctl, int *cpumaplen,
     virBitmapPtr map = NULL;
 
     if (cpulist[0] == 'r') {
-        if (!(map = virBitmapNew(maxcpu)))
-            return NULL;
+        map = virBitmapNew(maxcpu);
         virBitmapSetAll(map);
     } else {
         int lastcpu;
@@ -7294,7 +7285,7 @@ cmdEmulatorPin(vshControl *ctl, const vshCmd *cmd)
             flags = VIR_DOMAIN_AFFECT_CURRENT;
 
         cpumaplen = VIR_CPU_MAPLEN(maxcpu);
-        cpumap = vshMalloc(ctl, cpumaplen);
+        cpumap = g_new0(unsigned char, cpumaplen);
         if (virDomainGetEmulatorPinInfo(dom, cpumap,
                                         cpumaplen, flags) >= 0) {
             vshPrintExtra(ctl, "%s %s\n", _("emulator:"), _("CPU Affinity"));
@@ -7438,6 +7429,7 @@ static const vshCmdOptDef opts_guestvcpus[] = {
     VIRSH_COMMON_OPT_DOMAIN_FULL(VIR_CONNECT_LIST_DOMAINS_ACTIVE),
     {.name = "cpulist",
      .type = VSH_OT_STRING,
+     .completer = virshDomainVcpulistViaAgentCompleter,
      .help = N_("list of cpus to enable or disable")
     },
     {.name = "enable",
@@ -8177,8 +8169,7 @@ cmdCPUStats(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(params, nparams * MIN(show_count, 128)) < 0)
-        goto cleanup;
+    params = g_new0(virTypedParameter, nparams * MIN(show_count, 128));
 
     while (show_count) {
         int ncpus = MIN(show_count, 128);
@@ -8215,8 +8206,7 @@ cmdCPUStats(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
     }
 
-    if (VIR_ALLOC_N(params, nparams) < 0)
-        goto cleanup;
+    params = g_new0(virTypedParameter, nparams);
 
     /* passing start_cpu == -1 gives us domain's total status */
     if ((stats_per_cpu = virDomainGetCPUStats(dom, params, nparams,
@@ -8907,12 +8897,12 @@ static const vshCmdOptDef opts_send_process_signal[] = {
     {.name = "signame",
      .type = VSH_OT_DATA,
      .flags = VSH_OFLAG_REQ,
+     .completer = virshDomainSignalCompleter,
      .help = N_("the signal number or name")
     },
     {.name = NULL}
 };
 
-VIR_ENUM_DECL(virDomainProcessSignal);
 VIR_ENUM_IMPL(virDomainProcessSignal,
               VIR_DOMAIN_PROCESS_SIGNAL_LAST,
                "nop",    "hup",  "int",  "quit",  "ill", /* 0-4 */
@@ -9286,7 +9276,7 @@ cmdMemtune(vshControl *ctl, const vshCmd *cmd)
         }
 
         /* now go get all the memory parameters */
-        params = vshCalloc(ctl, nparams, sizeof(*params));
+        params = g_new0(virTypedParameter, nparams);
         if (virDomainGetMemoryParameters(dom, params, &nparams, flags) != 0) {
             vshError(ctl, "%s", _("Unable to get memory parameters"));
             goto cleanup;
@@ -9559,7 +9549,7 @@ cmdNumatune(vshControl * ctl, const vshCmd * cmd)
         }
 
         /* now go get all the numa parameters */
-        params = vshCalloc(ctl, nparams, sizeof(*params));
+        params = g_new0(virTypedParameter, nparams);
         if (virDomainGetNumaParameters(dom, params, &nparams, flags) != 0) {
             vshError(ctl, "%s", _("Unable to get numa parameters"));
             goto cleanup;
@@ -10086,14 +10076,9 @@ cmdLxcEnterNamespace(vshControl *ctl, const vshCmd *cmd)
         goto cleanup;
 
     if (setlabel) {
-        if (VIR_ALLOC(secmodel) < 0) {
-            vshError(ctl, "%s", _("Failed to allocate security model"));
-            goto cleanup;
-        }
-        if (VIR_ALLOC(seclabel) < 0) {
-            vshError(ctl, "%s", _("Failed to allocate security label"));
-            goto cleanup;
-        }
+        secmodel = g_new0(virSecurityModel, 1);
+        seclabel = g_new0(virSecurityLabel, 1);
+
         if (virNodeGetSecurityModel(priv->conn, secmodel) < 0)
             goto cleanup;
         if (virDomainGetSecurityLabel(dom, seclabel) < 0)
@@ -11942,122 +11927,6 @@ cmdDomHostname(vshControl *ctl, const vshCmd *cmd)
     return true;
 }
 
-/**
- * Check if n1 is superset of n2, meaning n1 contains all elements and
- * attributes as n2 at least. Including children.
- * @n1 first node
- * @n2 second node
- * returns true in case n1 covers n2, false otherwise.
- */
-G_GNUC_UNUSED
-static bool
-virshNodeIsSuperset(xmlNodePtr n1, xmlNodePtr n2)
-{
-    xmlNodePtr child1, child2;
-    xmlAttrPtr attr;
-    char *prop1, *prop2;
-    bool found;
-    bool visited;
-    bool ret = false;
-    long n1_child_size, n2_child_size, n1_iter;
-    virBitmapPtr bitmap;
-
-    if (!n1 && !n2)
-        return true;
-
-    if (!n1 || !n2)
-        return false;
-
-    if (!xmlStrEqual(n1->name, n2->name))
-        return false;
-
-    /* Iterate over n2 attributes and check if n1 contains them */
-    attr = n2->properties;
-    while (attr) {
-        if (attr->type == XML_ATTRIBUTE_NODE) {
-            prop1 = virXMLPropString(n1, (const char *) attr->name);
-            prop2 = virXMLPropString(n2, (const char *) attr->name);
-            if (STRNEQ_NULLABLE(prop1, prop2)) {
-                xmlFree(prop1);
-                xmlFree(prop2);
-                return false;
-            }
-            xmlFree(prop1);
-            xmlFree(prop2);
-        }
-        attr = attr->next;
-    }
-
-    n1_child_size = virXMLChildElementCount(n1);
-    n2_child_size = virXMLChildElementCount(n2);
-    if (n1_child_size < 0 || n2_child_size < 0 ||
-        n1_child_size < n2_child_size)
-        return false;
-
-    if (n1_child_size == 0 && n2_child_size == 0)
-        return true;
-
-    if (!(bitmap = virBitmapNew(n1_child_size)))
-        return false;
-
-    child2 = n2->children;
-    while (child2) {
-        if (child2->type != XML_ELEMENT_NODE) {
-            child2 = child2->next;
-            continue;
-        }
-
-        child1 = n1->children;
-        n1_iter = 0;
-        found = false;
-        while (child1) {
-            if (child1->type != XML_ELEMENT_NODE) {
-                child1 = child1->next;
-                continue;
-            }
-
-            if (virBitmapGetBit(bitmap, n1_iter, &visited) < 0) {
-                vshError(NULL, "%s", _("Bad child elements counting."));
-                goto cleanup;
-            }
-
-            if (visited) {
-                child1 = child1->next;
-                n1_iter++;
-                continue;
-            }
-
-            if (xmlStrEqual(child1->name, child2->name)) {
-                found = true;
-                if (virBitmapSetBit(bitmap, n1_iter) < 0) {
-                    vshError(NULL, "%s", _("Bad child elements counting."));
-                    goto cleanup;
-                }
-
-                if (!virshNodeIsSuperset(child1, child2))
-                    goto cleanup;
-
-                break;
-            }
-
-            child1 = child1->next;
-            n1_iter++;
-        }
-
-        if (!found)
-            goto cleanup;
-
-        child2 = child2->next;
-    }
-
-    ret = true;
-
- cleanup:
-    virBitmapFree(bitmap);
-    return ret;
-}
-
-
 /*
  * "detach-device" command
  */
@@ -13601,6 +13470,44 @@ virshEventBlockThresholdPrint(virConnectPtr conn G_GNUC_UNUSED,
 }
 
 
+VIR_ENUM_DECL(virshEventMemoryFailureRecipientType);
+VIR_ENUM_IMPL(virshEventMemoryFailureRecipientType,
+              VIR_DOMAIN_EVENT_MEMORY_FAILURE_RECIPIENT_LAST,
+              N_("hypervisor"),
+              N_("guest"));
+
+VIR_ENUM_DECL(virshEventMemoryFailureActionType);
+VIR_ENUM_IMPL(virshEventMemoryFailureActionType,
+              VIR_DOMAIN_EVENT_MEMORY_FAILURE_ACTION_LAST,
+              N_("ignore"),
+              N_("inject"),
+              N_("fatal"),
+              N_("reset"));
+
+static void
+virshEventMemoryFailurePrint(virConnectPtr conn G_GNUC_UNUSED,
+                             virDomainPtr dom,
+                             int recipient,
+                             int action,
+                             unsigned int flags,
+                             void *opaque)
+{
+    g_auto(virBuffer) buf = VIR_BUFFER_INITIALIZER;
+
+    virBufferAsprintf(&buf, _("event 'memory-failure' for domain %s:\n"
+                              "recipient: %s\naction: %s\n"),
+                      virDomainGetName(dom),
+                      UNKNOWNSTR(virshEventMemoryFailureRecipientTypeTypeToString(recipient)),
+                      UNKNOWNSTR(virshEventMemoryFailureActionTypeTypeToString(action)));
+    virBufferAsprintf(&buf, _("flags:\n"
+                              "\taction required: %d\n\trecursive: %d\n"),
+                      !!(flags & VIR_DOMAIN_MEMORY_FAILURE_ACTION_REQUIRED),
+                      !!(flags & VIR_DOMAIN_MEMORY_FAILURE_RECURSIVE));
+
+    virshEventPrint(opaque, &buf);
+}
+
+
 virshDomainEventCallback virshDomainEventCallbacks[] = {
     { "lifecycle",
       VIR_DOMAIN_EVENT_CALLBACK(virshEventLifecyclePrint), },
@@ -13650,6 +13557,8 @@ virshDomainEventCallback virshDomainEventCallbacks[] = {
       VIR_DOMAIN_EVENT_CALLBACK(virshEventMetadataChangePrint), },
     { "block-threshold",
       VIR_DOMAIN_EVENT_CALLBACK(virshEventBlockThresholdPrint), },
+    { "memory-failure",
+      VIR_DOMAIN_EVENT_CALLBACK(virshEventMemoryFailurePrint), },
 };
 G_STATIC_ASSERT(VIR_DOMAIN_EVENT_ID_LAST == G_N_ELEMENTS(virshDomainEventCallbacks));
 
@@ -13737,8 +13646,7 @@ cmdEvent(vshControl *ctl, const vshCmd *cmd)
     }
 
     if (all) {
-        if (VIR_ALLOC_N(data, VIR_DOMAIN_EVENT_ID_LAST) < 0)
-            goto cleanup;
+        data = g_new0(virshDomEventData, VIR_DOMAIN_EVENT_ID_LAST);
         for (i = 0; i < VIR_DOMAIN_EVENT_ID_LAST; i++) {
             data[i].ctl = ctl;
             data[i].loop = loop;
@@ -13748,8 +13656,7 @@ cmdEvent(vshControl *ctl, const vshCmd *cmd)
             data[i].id = -1;
         }
     } else {
-        if (VIR_ALLOC_N(data, 1) < 0)
-            goto cleanup;
+        data = g_new0(virshDomEventData, 1);
         data[0].ctl = ctl;
         data[0].loop = vshCommandOptBool(cmd, "loop");
         data[0].count = &count;
@@ -14302,6 +14209,10 @@ static const vshCmdOptDef opts_guestinfo[] = {
      .type = VSH_OT_BOOL,
      .help = N_("report filesystem information"),
     },
+    {.name = "disk",
+     .type = VSH_OT_BOOL,
+     .help = N_("report disk information"),
+    },
     {.name = NULL}
 };
 
@@ -14325,6 +14236,8 @@ cmdGuestInfo(vshControl *ctl, const vshCmd *cmd)
         types |= VIR_DOMAIN_GUEST_INFO_HOSTNAME;
     if (vshCommandOptBool(cmd, "filesystem"))
         types |= VIR_DOMAIN_GUEST_INFO_FILESYSTEM;
+    if (vshCommandOptBool(cmd, "disk"))
+        types |= VIR_DOMAIN_GUEST_INFO_DISKS;
 
     if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
         return false;
@@ -14345,6 +14258,158 @@ cmdGuestInfo(vshControl *ctl, const vshCmd *cmd)
     virshDomainFree(dom);
     return ret;
 }
+
+/*
+ * "get-user-sshkeys" command
+ */
+static const vshCmdInfo info_get_user_sshkeys[] = {
+    {.name = "help",
+     .data = N_("list authorized SSH keys for given user (via agent)")
+    },
+    {.name = "desc",
+     .data = N_("Use the guest agent to query authorized SSH keys for given "
+                "user")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_get_user_sshkeys[] = {
+    VIRSH_COMMON_OPT_DOMAIN_FULL(VIR_CONNECT_LIST_DOMAINS_ACTIVE),
+    {.name = "user",
+     .type = VSH_OT_DATA,
+     .flags = VSH_OFLAG_REQ,
+     .help = N_("user to list authorized keys for"),
+    },
+    {.name = NULL}
+};
+
+static bool
+cmdGetUserSSHKeys(vshControl *ctl, const vshCmd *cmd)
+{
+    virDomainPtr dom = NULL;
+    const char *user;
+    g_auto(GStrv) keys = NULL;
+    int nkeys = 0;
+    size_t i;
+    const unsigned int flags = 0;
+    bool ret = false;
+
+    if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
+        return false;
+
+    if (vshCommandOptStringReq(ctl, cmd, "user", &user) < 0)
+        goto cleanup;
+
+    nkeys = virDomainAuthorizedSSHKeysGet(dom, user, &keys, flags);
+    if (nkeys < 0)
+        goto cleanup;
+
+    for (i = 0; i < nkeys; i++) {
+        vshPrint(ctl, "%s", keys[i]);
+    }
+
+    ret = true;
+ cleanup:
+    virshDomainFree(dom);
+    return ret;
+}
+
+
+/*
+ * "set-user-sshkeys" command
+ */
+static const vshCmdInfo info_set_user_sshkeys[] = {
+    {.name = "help",
+     .data = N_("manipulate authorized SSH keys file for given user (via agent)")
+    },
+    {.name = "desc",
+     .data = N_("Append, reset or remove specified key from the authorized "
+                "keys file for given user")
+    },
+    {.name = NULL}
+};
+
+static const vshCmdOptDef opts_set_user_sshkeys[] = {
+    VIRSH_COMMON_OPT_DOMAIN_FULL(VIR_CONNECT_LIST_DOMAINS_ACTIVE),
+    {.name = "user",
+     .type = VSH_OT_DATA,
+     .flags = VSH_OFLAG_REQ,
+     .help = N_("user to set authorized keys for"),
+    },
+    {.name = "file",
+     .type = VSH_OT_STRING,
+     .help = N_("optional file to read keys from"),
+    },
+    {.name = "reset",
+     .type = VSH_OT_BOOL,
+     .help = N_("clear out authorized keys file before adding new keys"),
+    },
+    {.name = "remove",
+     .type = VSH_OT_BOOL,
+     .help = N_("remove keys from the authorized keys file"),
+    },
+    {.name = NULL}
+};
+
+static bool
+cmdSetUserSSHKeys(vshControl *ctl, const vshCmd *cmd)
+{
+    virDomainPtr dom = NULL;
+    const char *user;
+    const char *from;
+    g_autofree char *buffer = NULL;
+    g_auto(GStrv) keys = NULL;
+    int nkeys = 0;
+    unsigned int flags = 0;
+    bool ret = false;
+
+    VSH_REQUIRE_OPTION("remove", "file");
+    VSH_EXCLUSIVE_OPTIONS("reset", "remove");
+
+    if (!(dom = virshCommandOptDomain(ctl, cmd, NULL)))
+        return false;
+
+    if (vshCommandOptStringReq(ctl, cmd, "user", &user) < 0)
+        goto cleanup;
+
+    if (vshCommandOptStringReq(ctl, cmd, "file", &from) < 0)
+        goto cleanup;
+
+    if (!vshCommandOptBool(cmd, "reset")) {
+        flags |= VIR_DOMAIN_AUTHORIZED_SSH_KEYS_SET_APPEND;
+
+        if (!from) {
+            vshError(ctl, _("Option --file is required"));
+            goto cleanup;
+        }
+    }
+
+    if (vshCommandOptBool(cmd, "remove"))
+        flags |= VIR_DOMAIN_AUTHORIZED_SSH_KEYS_SET_REMOVE;
+
+    if (from) {
+        if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
+            vshSaveLibvirtError();
+            goto cleanup;
+        }
+
+        if (!(keys = virStringSplit(buffer, "\n", -1)))
+            goto cleanup;
+
+        nkeys = virStringListLength((const char **) keys);
+    }
+
+    if (virDomainAuthorizedSSHKeysSet(dom, user,
+                                      (const char **) keys, nkeys, flags) < 0) {
+        goto cleanup;
+    }
+
+    ret = true;
+ cleanup:
+    virshDomainFree(dom);
+    return ret;
+}
+
 
 const vshCmdDef domManagementCmds[] = {
     {.name = "attach-device",
@@ -14613,6 +14678,12 @@ const vshCmdDef domManagementCmds[] = {
      .info = info_event,
      .flags = 0
     },
+    {.name = "get-user-sshkeys",
+     .handler = cmdGetUserSSHKeys,
+     .opts = opts_get_user_sshkeys,
+     .info = info_get_user_sshkeys,
+     .flags = 0
+    },
     {.name = "inject-nmi",
      .handler = cmdInjectNMI,
      .opts = opts_inject_nmi,
@@ -14857,6 +14928,12 @@ const vshCmdDef domManagementCmds[] = {
      .handler = cmdSetLifecycleAction,
      .opts = opts_setLifecycleAction,
      .info = info_setLifecycleAction,
+     .flags = 0
+    },
+    {.name = "set-user-sshkeys",
+     .handler = cmdSetUserSSHKeys,
+     .opts = opts_set_user_sshkeys,
+     .info = info_set_user_sshkeys,
      .flags = 0
     },
     {.name = "set-user-password",

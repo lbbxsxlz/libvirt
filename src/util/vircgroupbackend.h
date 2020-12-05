@@ -23,7 +23,6 @@
 #include "internal.h"
 
 #include "vircgroup.h"
-#include "virhash.h"
 
 #define CGROUP_MAX_VAL 512
 
@@ -90,6 +89,10 @@ typedef int
                               const char *selfpath);
 
 typedef int
+(*virCgroupSetPlacementCB)(virCgroupPtr group,
+                           const char *path);
+
+typedef int
 (*virCgroupValidatePlacementCB)(virCgroupPtr group,
                                 pid_t pid);
 
@@ -136,7 +139,7 @@ typedef int
 typedef int
 (*virCgroupKillRecursiveCB)(virCgroupPtr group,
                             int signum,
-                            virHashTablePtr pids);
+                            GHashTable *pids);
 
 typedef int
 (*virCgroupBindMountCB)(virCgroupPtr group,
@@ -370,6 +373,7 @@ struct _virCgroupBackend {
     virCgroupCopyPlacementCB copyPlacement;
     virCgroupDetectMountsCB detectMounts;
     virCgroupDetectPlacementCB detectPlacement;
+    virCgroupSetPlacementCB setPlacement;
     virCgroupValidatePlacementCB validatePlacement;
     virCgroupStealPlacementCB stealPlacement;
     virCgroupDetectControllersCB detectControllers;

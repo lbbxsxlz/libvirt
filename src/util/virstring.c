@@ -259,16 +259,6 @@ virStringListMerge(char ***dst,
 }
 
 
-void virStringListAutoFree(char ***strings)
-{
-    if (!*strings)
-        return;
-
-    g_strfreev(*strings);
-    *strings = NULL;
-}
-
-
 /**
  * virStringListFreeCount:
  * @strings: array of strings to free
@@ -1222,8 +1212,7 @@ virStringToUpper(char **dst, const char *src)
     if (!src)
         return 0;
 
-    if (VIR_ALLOC_N(cap, strlen(src) + 1) < 0)
-        return -1;
+    cap = g_new0(char, strlen(src) + 1);
 
     for (i = 0; src[i]; i++) {
         cap[i] = g_ascii_toupper(src[i]);

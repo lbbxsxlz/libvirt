@@ -70,15 +70,15 @@ iptablesPrivateChainCreate(virFirewallPtr fw,
                            void *opaque)
 {
     iptablesGlobalChainData *data = opaque;
-    virHashTablePtr chains = NULL;
-    virHashTablePtr links = NULL;
+    GHashTable *chains = NULL;
+    GHashTable *links = NULL;
     const char *const *tmp;
     int ret = -1;
     size_t i;
 
-    if (!(chains = virHashCreate(50, NULL)))
+    if (!(chains = virHashNew(NULL)))
         goto cleanup;
-    if (!(links = virHashCreate(50, NULL)))
+    if (!(links = virHashNew(NULL)))
         goto cleanup;
 
     tmp = lines;
@@ -149,6 +149,13 @@ iptablesSetupPrivateChains(virFirewallLayer layer)
           natmangle_chains, G_N_ELEMENTS(natmangle_chains), &changed },
     };
     size_t i;
+
+    /* When the backend is firewalld, we need to make sure that
+     * firewalld has been fully started and completed its
+     * initialization, otherwise firewalld might delete our rules soon
+     * after we add them!
+     */
+    virFirewallBackendSynchronize();
 
     virFirewallStartTransaction(fw, 0);
 

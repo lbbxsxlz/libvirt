@@ -310,7 +310,7 @@ static void virLXCControllerFree(virLXCControllerPtr ctrl)
     g_free(ctrl->nbdpids);
 
     g_free(ctrl->nsFDs);
-    virCgroupFree(&ctrl->cgroup);
+    virCgroupFree(ctrl->cgroup);
 
     /* This must always be the last thing to be closed */
     VIR_FORCE_CLOSE(ctrl->handshakeFd);
@@ -422,6 +422,7 @@ static int virLXCControllerGetNICIndexes(virLXCControllerPtr ctrl)
         case VIR_DOMAIN_NET_TYPE_UDP:
         case VIR_DOMAIN_NET_TYPE_INTERNAL:
         case VIR_DOMAIN_NET_TYPE_HOSTDEV:
+        case VIR_DOMAIN_NET_TYPE_VDPA:
             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                            _("Unsupported net type %s"),
                            virDomainNetTypeToString(actualType));
@@ -478,7 +479,6 @@ static int virLXCControllerSetupLoopDeviceDisk(virDomainDiskDefPtr disk)
     int lofd;
     g_autofree char *loname = NULL;
     const char *src = virDomainDiskGetSource(disk);
-    int ret = -1;
 
     if ((lofd = virFileLoopDeviceAssociate(src, &loname)) < 0)
         return -1;
@@ -491,14 +491,7 @@ static int virLXCControllerSetupLoopDeviceDisk(virDomainDiskDefPtr disk)
      * the rest of container setup 'just works'
      */
     virDomainDiskSetType(disk, VIR_STORAGE_TYPE_BLOCK);
-    if (virDomainDiskSetSource(disk, loname) < 0)
-        goto cleanup;
-
-    ret = 0;
-
- cleanup:
-    if (ret < 0)
-        VIR_FORCE_CLOSE(lofd);
+    virDomainDiskSetSource(disk, loname);
 
     return lofd;
 
@@ -560,8 +553,7 @@ static int virLXCControllerSetupNBDDeviceDisk(virDomainDiskDefPtr disk)
      * the rest of container setup 'just works'
      */
     virDomainDiskSetType(disk, VIR_STORAGE_TYPE_BLOCK);
-    if (virDomainDiskSetSource(disk, dev) < 0)
-        return -1;
+    virDomainDiskSetSource(disk, dev);
 
     return 0;
 }
@@ -756,9 +748,6 @@ static int virLXCControllerSetupCpuAffinity(virLXCControllerPtr ctrl)
         maxcpu = hostcpus;
 
     cpumap = virBitmapNew(maxcpu);
-    if (!cpumap)
-        return -1;
-
     cpumapToSet = cpumap;
 
     if (ctrl->def->cpumask) {

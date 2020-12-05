@@ -116,8 +116,7 @@ virLogDaemonNew(virLogDaemonConfigPtr config, bool privileged)
     virLogDaemonPtr logd;
     virNetServerPtr srv = NULL;
 
-    if (VIR_ALLOC(logd) < 0)
-        return NULL;
+    logd = g_new0(virLogDaemon, 1);
 
     g_mutex_init(&logd->lock);
 
@@ -214,8 +213,7 @@ virLogDaemonNewPostExecRestart(virJSONValuePtr object, bool privileged,
     virJSONValuePtr child;
     const char *serverNames[] = { "virtlogd" };
 
-    if (VIR_ALLOC(logd) < 0)
-        return NULL;
+    logd = g_new0(virLogDaemon, 1);
 
     g_mutex_init(&logd->lock);
 
@@ -330,8 +328,7 @@ virLogDaemonClientNew(virNetServerClientPtr client,
     unsigned long long timestamp;
     bool privileged = opaque != NULL;
 
-    if (VIR_ALLOC(priv) < 0)
-        return NULL;
+    priv = g_new0(virLogDaemonClient, 1);
 
     g_mutex_init(&priv->lock);
 
@@ -511,7 +508,7 @@ virLogDaemonPreExecRestart(const char *state_file,
     virJSONValuePtr child;
     char *state = NULL;
     virJSONValuePtr object = virJSONValueNewObject();
-    char *magic;
+    char *magic = NULL;
 
     VIR_DEBUG("Running pre-restart exec");
 
@@ -526,10 +523,8 @@ virLogDaemonPreExecRestart(const char *state_file,
     if (!(magic = virLogDaemonGetExecRestartMagic()))
         goto cleanup;
 
-    if (virJSONValueObjectAppendString(object, "magic", magic) < 0) {
-        VIR_FREE(magic);
+    if (virJSONValueObjectAppendString(object, "magic", magic) < 0)
         goto cleanup;
-    }
 
     if (!(child = virLogHandlerPreExecRestart(logDaemon->handler)))
         goto cleanup;
@@ -562,6 +557,7 @@ virLogDaemonPreExecRestart(const char *state_file,
     abort(); /* This should be impossible to reach */
 
  cleanup:
+    VIR_FREE(magic);
     VIR_FREE(state);
     virJSONValueFree(object);
     return -1;

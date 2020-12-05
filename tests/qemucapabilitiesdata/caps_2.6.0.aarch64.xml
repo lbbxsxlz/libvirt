@@ -52,6 +52,7 @@
   <flag name='virtio-mmio'/>
   <flag name='ich9-intel-hda'/>
   <flag name='boot-strict'/>
+  <flag name='enable-fips'/>
   <flag name='usb-kbd'/>
   <flag name='msg-timestamp'/>
   <flag name='active-commit'/>
@@ -126,6 +127,8 @@
   <flag name='tcg'/>
   <flag name='pvscsi'/>
   <flag name='fw_cfg'/>
+  <flag name='dc390'/>
+  <flag name='am53c974'/>
   <version>2006000</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>61700244</microcodeVersion>

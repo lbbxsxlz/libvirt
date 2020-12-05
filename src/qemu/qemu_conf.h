@@ -108,6 +108,7 @@ struct _virQEMUDriverConfig {
     char *defaultTLSx509certdir;
     bool defaultTLSx509certdirPresent;
     bool defaultTLSx509verify;
+    bool defaultTLSx509verifyPresent;
     char *defaultTLSx509secretUUID;
 
     bool vncAutoUnixSocket;
@@ -139,6 +140,7 @@ struct _virQEMUDriverConfig {
     bool migrateTLSx509verify;
     bool migrateTLSx509verifyPresent;
     char *migrateTLSx509secretUUID;
+    bool migrateTLSForce;
 
     char *backupTLSx509certdir;
     bool backupTLSx509verify;
@@ -296,7 +298,7 @@ struct _virQEMUDriver {
     virHostdevManagerPtr hostdevMgr;
 
     /* Immutable pointer. Unsafe APIs. XXX */
-    virHashTablePtr sharedDevices;
+    GHashTable *sharedDevices;
 
     /* Immutable pointer, immutable object */
     virPortAllocatorRangePtr remotePorts;

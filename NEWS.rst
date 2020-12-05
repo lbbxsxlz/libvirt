@@ -8,8 +8,140 @@ the changes introduced by each of them.
 For a more fine-grained view, use the `git log`_.
 
 
-v6.8.0 (unreleased)
+v7.0.0 (unreleased)
 ===================
+
+* **New features**
+
+* **Improvements**
+
+* **Bug fixes**
+
+
+v6.10.0 (2020-12-01)
+====================
+
+* **Security**
+
+  * qemu: Enable client TLS certificate validation by default for ``chardev``,
+    ``migration``, and ``backup`` servers.
+
+  The default value if qemu.conf options ``chardev_tls_x509_verify``,
+  ``migrate_tls_x509_verify``, or  ``backup_tls_x509_verify`` are not specified
+  explicitly in the config file and also the ``default_tls_x509_verify`` config
+  option is missing are now '1'. This ensures that only legitimate clients
+  access servers, which don't have any additional form of authentication.
+
+* **New features**
+
+  * qemu: Implement OpenSSH authorized key file management APIs
+
+    New APIs (``virDomainAuthorizedSSHKeysGet()`` and
+    ``virDomainAuthorizedSSHKeysSet()``) and virsh commands
+    (``get-user-sshkeys`` and ``set-user-sshkeys``) are added to manage
+    authorized_keys SSH file for user.
+
+  * hyperv: implement new APIs
+
+    The ``virDomainGetMaxMemory()``, ``virDomainSetMaxMemory()``,
+    ``virDomainGetSchedulerType()``, ``virDomainGetSchedulerParameters()``,
+    ``virDomainGetSchedulerParametersFlags()``, ``virDomainGetVcpus()``,
+    ``virDomainGetVcpusFlags()``, ``virDomainGetMaxVcpus()``,
+    ``virDomainSetVcpus()``, and ``virDomainSetVcpusFlags()`` APIs have been
+    implemented in the Hyper-V driver.
+
+* **Improvements**
+
+  * virsh: Support network disks in ``virsh attach-disk``
+
+    The ``virsh attach-disk`` helper command which simplifies attaching of disks
+    without the need for the user to formulate the disk XML manually now
+    supports network-backed images. Users can specify the protocol and host
+    specification with new command line arguments. Please refer to the man
+    page of virsh for further information.
+
+* **Bug fixes**
+
+  * remote: fixed performance regression in SSH tunnelling
+
+    The ``virt-ssh-helper`` binary introduced in 6.8.0 had very
+    poor scalability which impacted libvirt tunnelled migration
+    and storage volume upload/download in particular. It has been
+    updated and now has performance on par with netcat.
+
+* **Removed features**
+
+  * hyperv: removed support for the Hyper-V V1 WMI API
+
+    This drops support for Windows Server 2008R2 and 2012.
+    The earliest supported version is now Windows 2012R2.
+
+
+v6.9.0 (2020-11-02)
+===================
+
+* **New features**
+
+  * nodedev: Add support for channel subsystem (CSS) devices on S390
+
+    A CSS device is represented as a parent device of a CCW device.
+    This support allows to create vfio-ccw mediated devices with
+    ``virNodeDeviceCreateXML()``.
+
+  * qemu: Implement memory failure event
+
+    New event is implemented that is emitted whenever a guest encounters a
+    memory failure.
+
+  * qemu: Implement support for ``<transient/>`` disks
+
+    VMs based on the QEMU hypervisor now can use ``<transient/>`` option for
+    local file-backed disks to configure a disk which discards changes made to
+    it while the VM was active.
+
+  * hyperv: implement new APIs
+
+    The ``virConnectGetCapabilities()``, ``virConnectGetMaxVcpus()``,
+    ``virConnectGetVersion()``, ``virDomainGetAutostart()``,
+    ``virDomainSetAutostart()``, ``virNodeGetFreeMemory()``,
+    ``virDomainReboot()``, ``virDomainReset()``, ``virDomainShutdown()``, and
+    ``virDomainShutdownFlags()`` APIs have been implemented in the Hyper-V
+    driver.
+
+  * bhyve: implement virtio-9p filesystem support
+
+    Implement virito-9p shared filesystem using the ``<filesystem/>`` element.
+
+  * qemu: Add support for vDPA network devices.
+
+    VMs using the QEMU hypervisor can now specify vDPA network devices
+    using ``<interface type='vdpa'>``. The node device APIs also now
+    list and provide XML descriptions for vDPA devices.
+
+* **Bug fixes**
+
+  * hyperv: ensure WQL queries work in all locales
+
+    Relying on the "Description" field caused queries to fail on non-"en-US"
+    systems. The queries have been updated to avoid using localized strings.
+
+  * rpc: Fix ``virt-ssh-helper`` detection
+
+    libvirt 6.8.0 failed to correctly detect the availability of the new
+    ``virt-ssh-helper`` command on the remote host, and thus always used the
+    fallback instead; this has now been fixed.
+
+
+v6.8.0 (2020-10-01)
+===================
+
+* **Security**
+
+  * qemu: double free in qemuAgentGetInterfaces() in qemu_agent.c
+
+    Clients connecting to the read-write socket with limited ACL permissions
+    may be able to crash the libvirt daemon, resulting in a denial of service,
+    or potentially escalate their privileges on the system. CVE-2020-25637.
 
 * **New features**
 
@@ -19,6 +151,38 @@ v6.8.0 (unreleased)
     PCI hostdev, which may cause problems for some devices. The ``writeFiltering``
     attribute of the device's ``<source>`` element can be used to disable the
     filtering and allow all guest writes to the configuration space.
+
+  * bhyve: Support setting the framebuffer resolution
+
+    Libvirt can now set the framebuffer's "w" and "h" parameters
+    using the ``resolution`` element.
+
+  * bhyve: Support VNC password authentication
+
+    Libvirt can now probe whether the bhyve binary supports
+    VNC password authentication. In case it does, a VNC password
+    can now be passed using the ``passwd`` attribute on
+    the ``<graphics>`` element.
+
+  * remote: ``virt-ssh-helper`` replaces ``nc`` for SSH tunnelling
+
+    Libvirt now provides a ``virt-ssh-helper`` binary on the server
+    side. The libvirt remote client will use this binary for setting
+    up an SSH tunnelled connection to hosts. If not present, it will
+    transparently fallback to the traditional ``nc`` tunnel. The new
+    binary makes it possible for libvirt to transparently connect
+    across hosts even if libvirt is built with a different installation
+    prefix on the client vs server. It also enables remote access to
+    the unprivileged per-user libvirt daemons (e.g. using a URI such as
+    ``qemu+ssh://hostname/session``). The only requirement is that
+    ``virt-ssh-helper`` is present in ``$PATH`` of the remote host.
+
+  * esx: implement few APIs
+
+    The ``virConnectListAllNetworks()``, ``virDomainGetHostname()``, and
+    ``virDomainInterfaceAddresses()`` (only for
+    ``VIR_DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT`` source) APIs were implemented
+    in the esx driver.
 
 * **Improvements**
 
@@ -35,7 +199,27 @@ v6.8.0 (unreleased)
     change we also remove dependency on libdbus and possibly fix all the DBus
     related libvirtd crashes seen over the time.
 
+  * Re-introduce NVDIMM auto-alignment for pSeries Guests
+
+    The auto-alignment logic was removed in v6.7.0 in favor of requiring the
+    size provided by the user to be already aligned; however, this had the
+    unintended consequence of breaking some existing guests. v6.8.0 restores
+    the previous behavior with an improvement: it also reflects the auto-aligned
+    value in the domain XML.
+
+  * qemu: Preserve qcow2 cluster size after external snapshots
+
+    The new overlay image which is installed on top of the current chain when
+    taking an external snapshot now preserves the cluser size of the original
+    top image to preserve any performance tuning done on the original image.
+
 * **Bug fixes**
+
+  * qemu: Various (i)SCSI backed hostdev fixes
+
+    (i)SCSI backed hostdevs now work again with an arbitrarily long
+    user-specified device alias and also honor the 'readonly' property after a
+    recent rewrite.
 
 * **Removed features**
 
@@ -44,6 +228,7 @@ v6.8.0 (unreleased)
     HAL is deprecated on all supported OS so there is no need to keep it
     in libvirt. udev backend is used on Linux OSes and devd can be eventually
     implemented as replacement for FreeBSD.
+
 
 v6.7.0 (2020-09-01)
 ===================
@@ -97,6 +282,11 @@ v6.7.0 (2020-09-01)
     and the guest, unaligned NVDIMM sizes for pSeries guests will now be
     forbidden and no size auto-alignment will be made. Instead, libvirt will
     suggest an aligned round up size for the user.
+
+  * apparmor: Several improvements
+
+    Add support for virtiofs filesystem and allow QEMU to load old
+    shared objects after upgrade.
 
 * **Bug fixes**
 
@@ -328,6 +518,12 @@ v6.4.0 (2020-06-02)
     ``virsh capabilities`` will now include information about the host CPU when
     run on ARM machines.
 
+  * qemu: support network interface downscript
+
+    QEMU has the ability to run a script when a NIC is brought up and down.
+    Libvirt only enables use of the up script. Now add support for postscript
+    when NIC is down/detached.
+
 * **Improvements**
 
   * qemu: stricter validation for disk type='lun'
@@ -344,6 +540,8 @@ v6.4.0 (2020-06-02)
     be auto-filled with the remaining vCPUs. This behavior reproduces what QEMU
     already does in these cases. Users are encouraged to provide complete NUMA
     topologies to avoid unexpected changes in the domain XML.
+
+  * Cooperlake x86 CPU model is added
 
 * **Bug fixes**
 
@@ -378,18 +576,12 @@ v6.3.0 (2020-05-05)
 
 * **New features**
 
-  * qemu: support network interface downscript
-
-    QEMU has the ability to run a script when a NIC is brought up and down.
-    Libvirt only enables use of the up script. Now add support for postscript
-    when NIC is down/detached.
-
   * qemu: support disabling hotplug/unplug of PCIe devices
 
     libvirt can now set the "hotplug" option for pcie-root-ports and
     pcie-switch-downstream-ports, which can be used to disable hotplug/unplug
     of devices from these ports (default behavior is for these controllers to
-    accept all hotplug/unplug attempts, but this is often undesireable).
+    accept all hotplug/unplug attempts, but this is often undesirable).
 
   * vbox: added support for version 6.0 and 6.1 APIs
 
@@ -873,7 +1065,7 @@ v5.10.0 (2019-12-02)
 
   * Forcibly create nodes in domain's namespace
 
-    The QEMU driver starts a domain in a namepsace with private ``/dev`` and
+    The QEMU driver starts a domain in a namespace with private ``/dev`` and
     creates only those nodes there which the domain is configured to have.
     However, it may have happened that if a node changed its minor number this
     change wasn't propagated to the namespace.
@@ -1176,7 +1368,7 @@ v5.6.0 (2019-08-05)
 
   * network: Allow passing arbitrary options to dnsmasq
 
-    This works similarly to the existing support for passing arbitary options
+    This works similarly to the existing support for passing arbitrary options
     to QEMU, and just like that feature it comes with no support guarantees.
 
 * **Removed features**
@@ -2190,7 +2382,7 @@ v4.4.0 (2018-06-04)
 
 * **Improvements**
 
-  * qemu: Add suport for OpenGL rendering with SDL
+  * qemu: Add support for OpenGL rendering with SDL
 
     Domains using SDL as a graphics backend will now be able to use OpenGL
     accelerated rendering.

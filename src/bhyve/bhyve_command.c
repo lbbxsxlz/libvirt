@@ -329,7 +329,8 @@ bhyveBuildControllerArgStr(const virDomainDef *def,
                            virDomainControllerDefPtr controller,
                            bhyveConnPtr driver,
                            virCommandPtr cmd,
-                           unsigned *nusbcontrollers)
+                           unsigned *nusbcontrollers,
+                           unsigned *nisacontrollers)
 {
     switch (controller->type) {
     case VIR_DOMAIN_CONTROLLER_TYPE_PCI:
@@ -354,15 +355,17 @@ bhyveBuildControllerArgStr(const virDomainDef *def,
         if (bhyveBuildUSBControllerArgStr(def, controller, cmd) < 0)
             return -1;
         break;
+    case VIR_DOMAIN_CONTROLLER_TYPE_ISA:
+        if (++*nisacontrollers > 1) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            "%s", _("only single ISA controller is supported"));
+             return -1;
+        }
+        virCommandAddArg(cmd, "-s");
+        virCommandAddArgFormat(cmd, "%d:0,lpc",
+                                controller->info.addr.pci.slot);
+        break;
     }
-    return 0;
-}
-
-static int
-bhyveBuildLPCArgStr(const virDomainDef *def G_GNUC_UNUSED,
-                    virCommandPtr cmd)
-{
-    virCommandAddArgList(cmd, "-s", "1,lpc", NULL);
     return 0;
 }
 
@@ -421,17 +424,6 @@ bhyveBuildGraphicsArgStr(const virDomainDef *def,
             return -1;
         }
 
-        if (graphics->data.vnc.auth.passwd) {
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("vnc password auth not supported"));
-            return -1;
-        } else {
-             /* Bhyve doesn't support VNC Auth yet, so print a warning about
-              * unauthenticated VNC sessions */
-             VIR_WARN("%s", _("Security warning: currently VNC auth is not"
-                              " supported."));
-        }
-
         if (glisten->address) {
             escapeAddr = strchr(glisten->address, ':') != NULL;
             if (escapeAddr)
@@ -464,6 +456,31 @@ bhyveBuildGraphicsArgStr(const virDomainDef *def,
         virReportEnumRangeError(virDomainGraphicsListenType, glisten->type);
         return -1;
     }
+
+    if (graphics->data.vnc.auth.passwd) {
+        if (!(bhyveDriverGetBhyveCaps(driver) & BHYVE_CAP_VNC_PASSWORD)) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("VNC Password authentication not supported "
+                             "by bhyve"));
+            return -1;
+        }
+
+        if (strchr(graphics->data.vnc.auth.passwd, ',')) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                           _("Password may not contain ',' character"));
+            return -1;
+        }
+
+        virBufferAsprintf(&opt, ",password=%s", graphics->data.vnc.auth.passwd);
+    } else {
+        if (!(bhyveDriverGetBhyveCaps(driver) & BHYVE_CAP_VNC_PASSWORD))
+            VIR_WARN("%s", _("Security warning: VNC auth is not supported."));
+        else
+            VIR_WARN("%s", _("Security warning: VNC is used without authentication."));
+    }
+
+    if (video->res)
+        virBufferAsprintf(&opt, ",w=%d,h=%d", video->res->x, video->res->y);
 
     if (video->driver)
         virBufferAsprintf(&opt, ",vga=%s",
@@ -530,6 +547,73 @@ bhyveBuildSoundArgStr(const virDomainDef *def G_GNUC_UNUSED,
     return 0;
 }
 
+static int
+bhyveBuildFSArgStr(const virDomainDef *def G_GNUC_UNUSED,
+                   virDomainFSDefPtr fs,
+                   virCommandPtr cmd)
+{
+    g_auto(virBuffer) params = VIR_BUFFER_INITIALIZER;
+
+    switch ((virDomainFSType) fs->type) {
+    case VIR_DOMAIN_FS_TYPE_MOUNT:
+        break;
+    case VIR_DOMAIN_FS_TYPE_BLOCK:
+    case VIR_DOMAIN_FS_TYPE_FILE:
+    case VIR_DOMAIN_FS_TYPE_TEMPLATE:
+    case VIR_DOMAIN_FS_TYPE_RAM:
+    case VIR_DOMAIN_FS_TYPE_BIND:
+    case VIR_DOMAIN_FS_TYPE_VOLUME:
+    case VIR_DOMAIN_FS_TYPE_LAST:
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("unsupported filesystem type '%s'"),
+                       virDomainFSTypeToString(fs->type));
+        return -1;
+    }
+
+    switch (fs->fsdriver) {
+    case VIR_DOMAIN_FS_DRIVER_TYPE_DEFAULT:
+        /* The only supported driver by bhyve currently */
+        break;
+    case VIR_DOMAIN_FS_DRIVER_TYPE_VIRTIOFS:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_PATH:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_HANDLE:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_LOOP:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_NBD:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_PLOOP:
+    case VIR_DOMAIN_FS_DRIVER_TYPE_LAST:
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("unsupported filesystem driver '%s'"),
+                       virDomainFSDriverTypeToString(fs->fsdriver));
+        return -1;
+    }
+
+    switch (fs->accessmode) {
+    case VIR_DOMAIN_FS_ACCESSMODE_PASSTHROUGH:
+        /* This is the only supported mode for now, does not need specific configuration */
+        break;
+    case VIR_DOMAIN_FS_ACCESSMODE_MAPPED:
+    case VIR_DOMAIN_FS_ACCESSMODE_SQUASH:
+    case VIR_DOMAIN_FS_ACCESSMODE_LAST:
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("unsupported filesystem accessmode '%s'"),
+                       virDomainFSAccessModeTypeToString(fs->accessmode));
+        return -1;
+    }
+
+    if (fs->readonly)
+        virBufferAddLit(&params, ",ro");
+
+    virCommandAddArg(cmd, "-s");
+    virCommandAddArgFormat(cmd, "%d:%d,virtio-9p,%s=%s%s",
+                           fs->info.addr.pci.slot,
+                           fs->info.addr.pci.function,
+                           fs->dst,
+                           fs->src->path,
+                           virBufferCurrentContent(&params));
+
+    return 0;
+}
+
 virCommandPtr
 virBhyveProcessBuildBhyveCmd(bhyveConnPtr driver, virDomainDefPtr def,
                              bool dryRun)
@@ -545,6 +629,7 @@ virBhyveProcessBuildBhyveCmd(bhyveConnPtr driver, virDomainDefPtr def,
     virCommandPtr cmd = virCommandNew(BHYVE);
     size_t i;
     unsigned nusbcontrollers = 0;
+    unsigned nisacontrollers = 0;
     unsigned nvcpus = virDomainDefGetVcpus(def);
 
     /* CPUs */
@@ -650,7 +735,7 @@ virBhyveProcessBuildBhyveCmd(bhyveConnPtr driver, virDomainDefPtr def,
     /* Devices */
     for (i = 0; i < def->ncontrollers; i++) {
         if (bhyveBuildControllerArgStr(def, def->controllers[i], driver, cmd,
-                                       &nusbcontrollers) < 0)
+                                       &nusbcontrollers, &nisacontrollers) < 0)
             goto error;
     }
     for (i = 0; i < def->nnets; i++) {
@@ -681,8 +766,10 @@ virBhyveProcessBuildBhyveCmd(bhyveConnPtr driver, virDomainDefPtr def,
             goto error;
     }
 
-    if (bhyveDomainDefNeedsISAController(def))
-        bhyveBuildLPCArgStr(def, cmd);
+    for (i = 0; i < def->nfss; i++) {
+        if (bhyveBuildFSArgStr(def, def->fss[i], cmd) < 0)
+            goto error;
+    }
 
     if (bhyveBuildConsoleArgStr(def, cmd) < 0)
         goto error;

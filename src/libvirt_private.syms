@@ -86,6 +86,7 @@ virDomainCheckpointDefFormat;
 virDomainCheckpointDefNew;
 virDomainCheckpointDefParseString;
 virDomainCheckpointFormatConvertXMLFlags;
+virDomainCheckpointRedefineCommit;
 virDomainCheckpointRedefinePrep;
 virDomainCheckpointTypeFromString;
 virDomainCheckpointTypeToString;
@@ -95,6 +96,7 @@ virDomainCheckpointTypeToString;
 virCPUCacheModeTypeFromString;
 virCPUCacheModeTypeToString;
 virCPUDefAddFeature;
+virCPUDefAddFeatureIfMissing;
 virCPUDefCheckFeatures;
 virCPUDefCopy;
 virCPUDefCopyModel;
@@ -128,6 +130,7 @@ virDeviceInfoPCIAddressIsWanted;
 virDomainDeviceAddressIsValid;
 virDomainDeviceAddressTypeToString;
 virDomainDeviceCcidAddressParseXML;
+virDomainDeviceCCWAddressEqual;
 virDomainDeviceCCWAddressIsValid;
 virDomainDeviceCCWAddressParseXML;
 virDomainDeviceDriveAddressParseXML;
@@ -210,7 +213,6 @@ virDomainCapsCPUModelsGet;
 virDomainCapsCPUModelsNew;
 virDomainCapsCPUUsableTypeFromString;
 virDomainCapsCPUUsableTypeToString;
-virDomainCapsDeviceDefValidate;
 virDomainCapsEnumClear;
 virDomainCapsEnumSet;
 virDomainCapsFormat;
@@ -401,6 +403,7 @@ virDomainDiskSourceFormat;
 virDomainDiskTranslateSourcePool;
 virDomainFeatureTypeFromString;
 virDomainFeatureTypeToString;
+virDomainFSAccessModeTypeToString;
 virDomainFSCacheModeTypeToString;
 virDomainFSDefFree;
 virDomainFSDefNew;
@@ -418,6 +421,7 @@ virDomainGraphicsAuthConnectedTypeFromString;
 virDomainGraphicsAuthConnectedTypeToString;
 virDomainGraphicsDefFree;
 virDomainGraphicsDefHasOpenGL;
+virDomainGraphicsDefNew;
 virDomainGraphicsGetListen;
 virDomainGraphicsGetRenderNode;
 virDomainGraphicsListenAppendAddress;
@@ -505,7 +509,6 @@ virDomainNetARPInterfaces;
 virDomainNetBandwidthUpdate;
 virDomainNetDefActualFromNetworkPort;
 virDomainNetDefActualToNetworkPort;
-virDomainNetDefClear;
 virDomainNetDefFormat;
 virDomainNetDefFree;
 virDomainNetDefNew;
@@ -702,6 +705,8 @@ virDomainEventLifecycleNew;
 virDomainEventLifecycleNewFromDef;
 virDomainEventLifecycleNewFromDom;
 virDomainEventLifecycleNewFromObj;
+virDomainEventMemoryFailureNewFromDom;
+virDomainEventMemoryFailureNewFromObj;
 virDomainEventMetadataChangeNewFromDom;
 virDomainEventMetadataChangeNewFromObj;
 virDomainEventMigrationIterationNewFromDom;
@@ -818,6 +823,7 @@ virNodeDeviceDefFree;
 virNodeDeviceDefParseFile;
 virNodeDeviceDefParseNode;
 virNodeDeviceDefParseString;
+virNodeDeviceGetCSSDynamicCaps;
 virNodeDeviceGetPCIDynamicCaps;
 virNodeDeviceGetSCSIHostCaps;
 virNodeDeviceGetSCSITargetCaps;
@@ -924,7 +930,6 @@ virNWFilterIPAddrMapShutdown;
 
 
 # conf/nwfilter_params.h
-virNWFilterHashTableCreate;
 virNWFilterHashTableEqual;
 virNWFilterHashTablePutAll;
 virNWFilterVarAccessGetVarName;
@@ -945,6 +950,7 @@ virNWFilterVarValueFree;
 virNWFilterVarValueGetCardinality;
 virNWFilterVarValueGetNthValue;
 virNWFilterVarValueGetSimple;
+virNWFilterVarValueHashFree;
 
 
 # conf/object_event.h
@@ -1604,6 +1610,10 @@ virSecurityManagerTransactionStart;
 virSecurityManagerVerify;
 
 
+# security/security_util.h
+virSecurityXATTRNamespaceDefined;
+
+
 # util/glibcompat.h
 vir_g_canonicalize_filename;
 vir_g_fsync;
@@ -1612,8 +1622,6 @@ vir_g_strdup_vprintf;
 
 
 # util/viralloc.h
-virAlloc;
-virAllocN;
 virAllocVar;
 virDeleteElementsN;
 virDispose;
@@ -1666,7 +1674,6 @@ virAuthConfigNewData;
 virBitmapClearAll;
 virBitmapClearBit;
 virBitmapClearBitExpand;
-virBitmapCopy;
 virBitmapCountBits;
 virBitmapDataFormat;
 virBitmapEqual;
@@ -1681,8 +1688,6 @@ virBitmapLastSetBit;
 virBitmapNew;
 virBitmapNewCopy;
 virBitmapNewData;
-virBitmapNewEmpty;
-virBitmapNewQuiet;
 virBitmapNewString;
 virBitmapNextClearBit;
 virBitmapNextSetBit;
@@ -1791,6 +1796,7 @@ virCgroupHasController;
 virCgroupHasEmptyTasks;
 virCgroupKillPainfully;
 virCgroupKillRecursive;
+virCgroupNew;
 virCgroupNewDetect;
 virCgroupNewDetectMachine;
 virCgroupNewDomainPartition;
@@ -1877,6 +1883,7 @@ virCommandNewVAList;
 virCommandNonblockingFDs;
 virCommandPassFD;
 virCommandPassFDGetFDIndex;
+virCommandPassFDIndex;
 virCommandRawStatus;
 virCommandRequireHandshake;
 virCommandRun;
@@ -2142,6 +2149,7 @@ virFileCacheSetPriv;
 # util/virfirewall.h
 virFirewallAddRuleFull;
 virFirewallApply;
+virFirewallBackendSynchronize;
 virFirewallFree;
 virFirewallNew;
 virFirewallRemoveRule;
@@ -2151,7 +2159,6 @@ virFirewallRuleAddArgList;
 virFirewallRuleAddArgSet;
 virFirewallRuleGetArgCount;
 virFirewallSetBackend;
-virFirewallSetLockOverride;
 virFirewallStartRollback;
 virFirewallStartTransaction;
 
@@ -2201,9 +2208,10 @@ virHashAddEntry;
 virHashAtomicNew;
 virHashAtomicSteal;
 virHashAtomicUpdate;
-virHashCreate;
 virHashEqual;
 virHashForEach;
+virHashForEachSafe;
+virHashForEachSorted;
 virHashFree;
 virHashGetItems;
 virHashHasEntry;
@@ -2215,9 +2223,7 @@ virHashRemoveSet;
 virHashSearch;
 virHashSize;
 virHashSteal;
-virHashTableSize;
 virHashUpdateEntry;
-virHashValueFree;
 
 
 # util/virhashcode.h
@@ -2403,6 +2409,7 @@ virJSONValueObjectGetNumberUint;
 virJSONValueObjectGetNumberUlong;
 virJSONValueObjectGetObject;
 virJSONValueObjectGetString;
+virJSONValueObjectGetStringArray;
 virJSONValueObjectGetValue;
 virJSONValueObjectHasKey;
 virJSONValueObjectIsNull;
@@ -2512,6 +2519,7 @@ virMediatedDeviceAttrNew;
 virMediatedDeviceFree;
 virMediatedDeviceGetIOMMUGroupDev;
 virMediatedDeviceGetIOMMUGroupNum;
+virMediatedDeviceGetMdevTypes;
 virMediatedDeviceGetSysfsPath;
 virMediatedDeviceGetUsedBy;
 virMediatedDeviceIsUsed;
@@ -2582,9 +2590,11 @@ virNetDevSetOnline;
 virNetDevSetPromiscuous;
 virNetDevSetRcvAllMulti;
 virNetDevSetRcvMulti;
+virNetDevSetRootQDisc;
 virNetDevSetupControl;
 virNetDevSysfsFile;
 virNetDevValidateConfig;
+virNetDevVFInterfaceStats;
 
 
 # util/virnetdevbandwidth.h
@@ -2846,10 +2856,8 @@ virPCIELinkSpeedTypeFromString;
 virPCIELinkSpeedTypeToString;
 virPCIGetDeviceAddressFromSysfsLink;
 virPCIGetHeaderType;
-virPCIGetMdevTypes;
 virPCIGetNetName;
 virPCIGetPhysicalFunction;
-virPCIGetSysfsFile;
 virPCIGetVirtualFunctionIndex;
 virPCIGetVirtualFunctionInfo;
 virPCIGetVirtualFunctions;
@@ -3218,7 +3226,6 @@ virStringHasSuffix;
 virStringIsEmpty;
 virStringIsPrintable;
 virStringListAdd;
-virStringListAutoFree;
 virStringListFreeCount;
 virStringListGetFirstWithPrefix;
 virStringListHasString;
@@ -3506,7 +3513,6 @@ virVsockSetGuestCid;
 # util/virxml.h
 virParseScaledValue;
 virXMLCheckIllegalChars;
-virXMLChildElementCount;
 virXMLExtractNamespaceXML;
 virXMLFormatElement;
 virXMLNodeContentString;

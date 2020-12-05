@@ -190,7 +190,17 @@ int main(int argc, char **argv) {
         }
 
         for (i = 0; i < numpollfds; i++) {
-            if (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
+            short revents = POLLIN | POLLHUP | POLLERR;
+
+# ifdef __APPLE__
+            /*
+             * poll() on /dev/null will return POLLNVAL
+             * Apple-Feedback: FB8785208
+             */
+            revents |= POLLNVAL;
+# endif
+
+            if (fds[i].revents & revents) {
                 fds[i].revents = 0;
 
                 got = read(fds[i].fd, buf, sizeof(buf));
@@ -221,9 +231,9 @@ int main(int argc, char **argv) {
     }
 
     for (i = 0; i < numpollfds; i++) {
-        if (write(STDOUT_FILENO, buffers[i], buflen[i]) != buflen[i])
+        if (fwrite(buffers[i], 1, buflen[i], stdout) != buflen[i])
             goto cleanup;
-        if (write(STDERR_FILENO, buffers[i], buflen[i]) != buflen[i])
+        if (fwrite(buffers[i], 1, buflen[i], stderr) != buflen[i])
             goto cleanup;
     }
 

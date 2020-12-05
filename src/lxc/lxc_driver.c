@@ -1700,7 +1700,7 @@ lxcDomainInterfaceAddresses(virDomainPtr dom,
     if (!(vm = lxcDomObjFromDomain(dom)))
         goto cleanup;
 
-    if (virDomainInterfaceAddressesEnsureACL(dom->conn, vm->def) < 0)
+    if (virDomainInterfaceAddressesEnsureACL(dom->conn, vm->def, source) < 0)
         goto cleanup;
 
     if (virDomainObjCheckActive(vm) < 0)
@@ -3045,8 +3045,7 @@ lxcDomainAttachDeviceConfig(virDomainDefPtr vmdef,
                            _("target %s already exists."), disk->dst);
             return -1;
         }
-        if (virDomainDiskInsert(vmdef, disk) < 0)
-            return -1;
+        virDomainDiskInsert(vmdef, disk);
         /* vmdef has the pointer. Generic codes for vmdef will do all jobs */
         dev->data.disk = NULL;
         ret = 0;
@@ -3504,6 +3503,7 @@ lxcDomainAttachDeviceNetLive(virLXCDriverPtr driver,
     case VIR_DOMAIN_NET_TYPE_INTERNAL:
     case VIR_DOMAIN_NET_TYPE_HOSTDEV:
     case VIR_DOMAIN_NET_TYPE_UDP:
+    case VIR_DOMAIN_NET_TYPE_VDPA:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Network device type is not supported"));
         goto cleanup;
@@ -3558,6 +3558,7 @@ lxcDomainAttachDeviceNetLive(virLXCDriverPtr driver,
         case VIR_DOMAIN_NET_TYPE_INTERNAL:
         case VIR_DOMAIN_NET_TYPE_HOSTDEV:
         case VIR_DOMAIN_NET_TYPE_UDP:
+        case VIR_DOMAIN_NET_TYPE_VDPA:
         case VIR_DOMAIN_NET_TYPE_LAST:
         default:
             /* no-op */
@@ -3999,6 +4000,7 @@ lxcDomainDetachDeviceNetLive(virDomainObjPtr vm,
     case VIR_DOMAIN_NET_TYPE_INTERNAL:
     case VIR_DOMAIN_NET_TYPE_HOSTDEV:
     case VIR_DOMAIN_NET_TYPE_UDP:
+    case VIR_DOMAIN_NET_TYPE_VDPA:
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
                        _("Only bridged veth devices can be detached"));
         goto cleanup;

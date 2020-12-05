@@ -176,6 +176,7 @@ virshConnect(vshControl *ctl, const char *uri, bool readonly)
         }
         vshDebug(ctl, VSH_ERR_INFO, "%s",
                  _("Failed to setup keepalive on connection\n"));
+        vshResetLibvirtError();
     }
 
  cleanup:
@@ -548,9 +549,6 @@ virshShowVersion(vshControl *ctl G_GNUC_UNUSED)
 #endif
 #ifdef WITH_NWFILTER
     vshPrint(ctl, " Nwfilter");
-#endif
-#ifdef WITH_VIRTUALPORT
-    vshPrint(ctl, " VirtualPort");
 #endif
     vshPrint(ctl, "\n");
 

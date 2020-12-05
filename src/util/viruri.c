@@ -157,8 +157,7 @@ virURIParse(const char *uri)
         return NULL;
     }
 
-    if (VIR_ALLOC(ret) < 0)
-        goto error;
+    ret = g_new0(virURI, 1);
 
     ret->scheme = g_strdup(xmluri->scheme);
     ret->server = g_strdup(xmluri->server);
@@ -210,7 +209,7 @@ char *
 virURIFormat(virURIPtr uri)
 {
     xmlURI xmluri;
-    char *tmpserver = NULL;
+    g_autofree char *tmpserver = NULL;
     char *ret;
 
     memset(&xmluri, 0, sizeof(xmluri));
@@ -242,11 +241,8 @@ virURIFormat(virURIPtr uri)
     ret = (char *)xmlSaveUri(&xmluri);
     if (!ret) {
         virReportOOMError();
-        goto cleanup;
+        return NULL;
     }
-
- cleanup:
-    VIR_FREE(tmpserver);
 
     return ret;
 }

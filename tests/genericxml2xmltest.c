@@ -154,6 +154,8 @@ mymain(void)
     DO_TEST_FULL(name, 1, false, TEST_COMPARE_DOM_XML2XML_RESULT_SUCCESS)
 
     DO_TEST_DIFFERENT("disk-virtio");
+    DO_TEST_DIFFERENT("disk-hyperv-physical");
+    DO_TEST_DIFFERENT("disk-hyperv-virtual");
 
     DO_TEST_DIFFERENT("graphics-vnc-minimal");
     DO_TEST_DIFFERENT("graphics-vnc-manual-port");
@@ -233,6 +235,7 @@ mymain(void)
     DO_TEST("launch-security-sev");
 
     DO_TEST_DIFFERENT("cputune");
+    DO_TEST("device-backenddomain");
 
 #define DO_TEST_BACKUP_FULL(name, intrnl) \
     do { \

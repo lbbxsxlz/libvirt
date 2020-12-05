@@ -77,7 +77,6 @@ char *     virXMLPropStringLimit(xmlNodePtr node,
                                  const char *name,
                                  size_t maxlen);
 char *   virXMLNodeContentString(xmlNodePtr node);
-long     virXMLChildElementCount(xmlNodePtr node);
 
 /* Internal function; prefer the macros below.  */
 xmlDocPtr      virXMLParseHelper(int domcode,
@@ -212,8 +211,15 @@ virXMLValidatorValidate(virXMLValidatorPtr validator,
 int
 virXMLValidateAgainstSchema(const char *schemafile,
                             xmlDocPtr xml);
+
+int
+virXMLValidateNodeAgainstSchema(const char *schemafile,
+                                xmlDocPtr doc,
+                                xmlNodePtr node);
+
 void
 virXMLValidatorFree(virXMLValidatorPtr validator);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(virXMLValidator, virXMLValidatorFree);
 
 void
 virXMLFormatElement(virBufferPtr buf,

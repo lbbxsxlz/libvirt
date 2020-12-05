@@ -265,16 +265,14 @@ virNumaGetNodeCPUs(int node,
         return -2;
     }
 
-    if (VIR_ALLOC_N(mask, mask_n_bytes / sizeof(*mask)) < 0)
-        return -1;
+    mask = g_new0(unsigned long, mask_n_bytes / sizeof(*mask));
 
     if (numa_node_to_cpus(node, mask, mask_n_bytes) < 0) {
         VIR_WARN("NUMA topology for cell %d is not available, ignoring", node);
         return -2;
     }
 
-    if (!(cpumap = virBitmapNew(max_n_cpus)))
-        return -1;
+    cpumap = virBitmapNew(max_n_cpus);
 
     for (i = 0; i < max_n_cpus; i++) {
         if (MASK_CPU_ISSET(mask, i)) {
@@ -311,7 +309,7 @@ virNumaNodesetToCPUset(virBitmapPtr nodeset,
     if (!nodeset)
         return 0;
 
-    allNodesCPUs = virBitmapNewEmpty();
+    allNodesCPUs = virBitmapNew(0);
     nodesetSize = virBitmapSize(nodeset);
 
     for (i = 0; i < nodesetSize; i++) {
@@ -478,9 +476,7 @@ virNumaGetDistances(int node,
     if ((max_node = virNumaGetMaxNode()) < 0)
         return -1;
 
-    if (VIR_ALLOC_N(*distances, max_node + 1) < 0)
-        return -1;
-
+    *distances = g_new0(int, max_node + 1);
     *ndistances = max_node + 1;
 
     for (i = 0; i <= max_node; i++) {
@@ -743,8 +739,7 @@ virNumaGetPages(int node,
                 unsigned long long **pages_free,
                 size_t *npages)
 {
-    int ret = -1;
-    DIR *dir = NULL;
+    g_autoptr(DIR) dir = NULL;
     int direrr = 0;
     struct dirent *entry;
     unsigned int ntmp = 0;
@@ -767,12 +762,12 @@ virNumaGetPages(int node,
      * slightly different information. So we take the total memory on a node
      * and subtract memory taken by the huge pages. */
     if (virNumaGetHugePageInfoDir(&path, node) < 0)
-        goto cleanup;
+        return -1;
 
     /* It's okay if the @path doesn't exist. Maybe we are running on
      * system without huge pages support where the path may not exist. */
     if (virDirOpenIfExists(&dir, path) < 0)
-        goto cleanup;
+        return -1;
 
     while (dir && (direrr = virDirRead(dir, &entry, path)) > 0) {
         const char *page_name = entry->d_name;
@@ -793,17 +788,17 @@ virNumaGetPages(int node,
             virReportError(VIR_ERR_INTERNAL_ERROR,
                            _("unable to parse %s"),
                            entry->d_name);
-            goto cleanup;
+            return -1;
         }
 
         if (virNumaGetHugePageInfo(node, page_size,
                                    &page_avail, &page_free) < 0)
-            goto cleanup;
+            return -1;
 
         if (VIR_REALLOC_N(tmp_size, ntmp + 1) < 0 ||
             VIR_REALLOC_N(tmp_avail, ntmp + 1) < 0 ||
             VIR_REALLOC_N(tmp_free, ntmp + 1) < 0)
-            goto cleanup;
+            return -1;
 
         tmp_size[ntmp] = page_size;
         tmp_avail[ntmp] = page_avail;
@@ -816,17 +811,17 @@ virNumaGetPages(int node,
     }
 
     if (direrr < 0)
-        goto cleanup;
+        return -1;
 
     /* Now append the ordinary system pages */
     if (VIR_REALLOC_N(tmp_size, ntmp + 1) < 0 ||
         VIR_REALLOC_N(tmp_avail, ntmp + 1) < 0 ||
         VIR_REALLOC_N(tmp_free, ntmp + 1) < 0)
-        goto cleanup;
+        return -1;
 
     if (virNumaGetPageInfo(node, system_page_size, huge_page_sum,
                            &tmp_avail[ntmp], &tmp_free[ntmp]) < 0)
-        goto cleanup;
+        return -1;
     tmp_size[ntmp] = system_page_size;
     ntmp++;
 
@@ -856,10 +851,7 @@ virNumaGetPages(int node,
         tmp_free = NULL;
     }
     *npages = ntmp;
-    ret = 0;
- cleanup:
-    VIR_DIR_CLOSE(dir);
-    return ret;
+    return 0;
 }
 
 
@@ -1027,8 +1019,7 @@ virNumaGetHostMemoryNodeset(void)
     if (maxnode < 0)
         return NULL;
 
-    if (!(nodeset = virBitmapNew(maxnode + 1)))
-        return NULL;
+    nodeset = virBitmapNew(maxnode + 1);
 
     for (i = 0; i <= maxnode; i++) {
         if (!virNumaNodeIsAvailable(i))

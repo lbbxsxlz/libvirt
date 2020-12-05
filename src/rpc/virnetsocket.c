@@ -920,7 +920,7 @@ virNetSocketNewConnectLibSSH2(const char *host,
     int ret = -1;
     int portN;
 
-    VIR_AUTOSTRINGLIST authMethodList = NULL;
+    g_auto(GStrv) authMethodList = NULL;
     char **authMethodNext;
 
     /* port number will be verified while opening the socket */
@@ -1052,7 +1052,7 @@ virNetSocketNewConnectLibssh(const char *host,
     int ret = -1;
     int portN;
 
-    VIR_AUTOSTRINGLIST authMethodList = NULL;
+    g_auto(GStrv) authMethodList = NULL;
     char **authMethodNext;
 
     /* port number will be verified while opening the socket */
@@ -1388,7 +1388,7 @@ int virNetSocketDupFD(virNetSocketPtr sock, bool cloexec)
     }
 #ifndef F_DUPFD_CLOEXEC
     if (cloexec &&
-        virSetCloseExec(fd < 0)) {
+        virSetCloseExec(fd) < 0) {
         int saveerr = errno;
         closesocket(fd);
         errno = saveerr;
@@ -1876,8 +1876,7 @@ static ssize_t virNetSocketReadSASL(virNetSocketPtr sock, char *buf, size_t len)
     if (sock->saslDecoded == NULL) {
         ssize_t encodedLen = virNetSASLSessionGetMaxBufSize(sock->saslSession);
         char *encoded;
-        if (VIR_ALLOC_N(encoded, encodedLen) < 0)
-            return -1;
+        encoded = g_new0(char, encodedLen);
         encodedLen = virNetSocketReadWire(sock, encoded, encodedLen);
 
         if (encodedLen <= 0) {

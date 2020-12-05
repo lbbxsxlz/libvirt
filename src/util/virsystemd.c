@@ -45,7 +45,7 @@ VIR_LOG_INIT("util.systemd");
 #endif
 
 struct _virSystemdActivation {
-    virHashTablePtr fds;
+    GHashTable *fds;
 };
 
 typedef struct _virSystemdActivationEntry virSystemdActivationEntry;
@@ -214,6 +214,7 @@ virSystemdGetMachineNameByPID(pid_t pid)
 
     if (virGDBusCallMethod(conn,
                            &reply,
+                           G_VARIANT_TYPE("(o)"),
                            NULL,
                            "org.freedesktop.machine1",
                            "/org/freedesktop/machine1",
@@ -236,6 +237,7 @@ virSystemdGetMachineNameByPID(pid_t pid)
 
     if (virGDBusCallMethod(conn,
                            &reply,
+                           G_VARIANT_TYPE("(v)"),
                            NULL,
                            "org.freedesktop.machine1",
                            object,
@@ -362,8 +364,7 @@ int virSystemdCreateMachine(const char *name,
     if (g_atomic_int_get(&hasCreateWithNetwork)) {
         g_autoptr(virError) error = NULL;
 
-        if (VIR_ALLOC(error) < 0)
-            return -1;
+        error = g_new0(virError, 1);
 
         guuid = g_variant_new_fixed_array(G_VARIANT_TYPE("y"),
                                           uuid, 16, sizeof(unsigned char));
@@ -384,6 +385,7 @@ int virSystemdCreateMachine(const char *name,
                                 gprops);
 
         rc = virGDBusCallMethod(conn,
+                                NULL,
                                 NULL,
                                 error,
                                 "org.freedesktop.machine1",
@@ -432,6 +434,7 @@ int virSystemdCreateMachine(const char *name,
         rc = virGDBusCallMethod(conn,
                                 NULL,
                                 NULL,
+                                NULL,
                                 "org.freedesktop.machine1",
                                 "/org/freedesktop/machine1",
                                 "org.freedesktop.machine1.Manager",
@@ -457,6 +460,7 @@ int virSystemdCreateMachine(const char *name,
                                 gprops);
 
         rc = virGDBusCallMethod(conn,
+                                NULL,
                                 NULL,
                                 NULL,
                                 "org.freedesktop.systemd1",
@@ -490,8 +494,7 @@ int virSystemdTerminateMachine(const char *name)
     if (!(conn = virGDBusGetSystemBus()))
         return -1;
 
-    if (VIR_ALLOC(error) < 0)
-        return -1;
+    error = g_new0(virError, 1);
 
     /*
      * The systemd DBus API we're invoking has the
@@ -507,6 +510,7 @@ int virSystemdTerminateMachine(const char *name)
 
     VIR_DEBUG("Attempting to terminate machine via systemd");
     if (virGDBusCallMethod(conn,
+                           NULL,
                            NULL,
                            error,
                            "org.freedesktop.machine1",
@@ -592,6 +596,7 @@ virSystemdPMSupportTarget(const char *methodName, bool *result)
 
     if (virGDBusCallMethod(conn,
                            &reply,
+                           G_VARIANT_TYPE("(s)"),
                            NULL,
                            "org.freedesktop.login1",
                            "/org/freedesktop/login1",
@@ -648,14 +653,8 @@ virSystemdActivationAddFD(virSystemdActivationPtr act,
     virSystemdActivationEntryPtr ent = virHashLookup(act->fds, name);
 
     if (!ent) {
-        if (VIR_ALLOC(ent) < 0)
-            return -1;
-
-        if (VIR_ALLOC_N(ent->fds, 1) < 0) {
-            virSystemdActivationEntryFree(ent);
-            return -1;
-        }
-
+        ent = g_new0(virSystemdActivationEntry, 1);
+        ent->fds = g_new0(int, 1);
         ent->fds[ent->nfds++] = fd;
 
         VIR_DEBUG("Record first FD %d with name %s", fd, name);
@@ -682,7 +681,7 @@ virSystemdActivationInitFromNames(virSystemdActivationPtr act,
                                   int nfds,
                                   const char *fdnames)
 {
-    VIR_AUTOSTRINGLIST fdnamelistptr = NULL;
+    g_auto(GStrv) fdnamelistptr = NULL;
     char **fdnamelist;
     size_t nfdnames;
     size_t i;
@@ -895,10 +894,9 @@ virSystemdActivationNew(virSystemdActivationMap *map,
     const char *fdnames;
 
     VIR_DEBUG("Activated with %d FDs", nfds);
-    if (VIR_ALLOC(act) < 0)
-        return NULL;
+    act = g_new0(virSystemdActivation, 1);
 
-    if (!(act->fds = virHashCreate(10, virSystemdActivationEntryFree)))
+    if (!(act->fds = virHashNew(virSystemdActivationEntryFree)))
         goto error;
 
     fdnames = getenv("LISTEN_FDNAMES");

@@ -87,7 +87,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
                           int *nparams)
 {
     const char *sysctl_name;
-    long *cpu_times;
+    g_autofree long *cpu_times = NULL;
     struct clockinfo clkinfo;
     size_t i, j, cpu_times_size, clkinfo_size;
     int cpu_times_num, offset, hz, stathz, ret = -1;
@@ -145,8 +145,7 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
 
     cpu_times_size = sizeof(long) * cpu_times_num * CPUSTATES;
 
-    if (VIR_ALLOC_N(cpu_times, cpu_times_num * CPUSTATES) < 0)
-        goto cleanup;
+    cpu_times = g_new0(long, cpu_times_num * CPUSTATES);
 
     if (sysctlbyname(sysctl_name, cpu_times, &cpu_times_size, NULL, 0) < 0) {
         virReportSystemError(errno,
@@ -173,8 +172,6 @@ virHostCPUGetStatsFreeBSD(int cpuNum,
     ret = 0;
 
  cleanup:
-    VIR_FREE(cpu_times);
-
     return ret;
 }
 
@@ -268,8 +265,7 @@ virHostCPUGetSiblingsList(unsigned int cpu)
     if (rv == -2) {
         /* If the file doesn't exist, the threadis its only sibling */
         ret = virBitmapNew(cpu + 1);
-        if (ret)
-            ignore_value(virBitmapSetBit(ret, cpu));
+        ignore_value(virBitmapSetBit(ret, cpu));
     }
 
     return ret;
@@ -310,7 +306,7 @@ virHostCPUParseNode(const char *node,
 {
     int ret = -1;
     int processors = 0;
-    DIR *cpudir = NULL;
+    g_autoptr(DIR) cpudir = NULL;
     struct dirent *cpudirent = NULL;
     virBitmapPtr node_cpus_map = NULL;
     virBitmapPtr sockets_map = NULL;
@@ -332,11 +328,10 @@ virHostCPUParseNode(const char *node,
         goto cleanup;
 
     /* Keep track of the CPUs that belong to the current node */
-    if (!(node_cpus_map = virBitmapNew(npresent_cpus)))
-        goto cleanup;
+    node_cpus_map = virBitmapNew(npresent_cpus);
 
     /* enumerate sockets in the node */
-    sockets_map = virBitmapNewEmpty();
+    sockets_map = virBitmapNew(0);
 
     while ((direrr = virDirRead(cpudir, &cpudirent, node)) > 0) {
         if (sscanf(cpudirent->d_name, "cpu%u", &cpu) != 1)
@@ -368,11 +363,10 @@ virHostCPUParseNode(const char *node,
     sock_max++;
 
     /* allocate cores maps for each socket */
-    if (VIR_ALLOC_N(cores_maps, sock_max) < 0)
-        goto cleanup;
+    cores_maps = g_new0(virBitmapPtr, sock_max);
 
     for (i = 0; i < sock_max; i++)
-        cores_maps[i] = virBitmapNewEmpty();
+        cores_maps[i] = virBitmapNew(0);
 
     /* Iterate over all CPUs in the node, in ascending order */
     for (cpu = 0; cpu < npresent_cpus; cpu++) {
@@ -447,7 +441,6 @@ virHostCPUParseNode(const char *node,
     ret = processors;
 
  cleanup:
-    VIR_DIR_CLOSE(cpudir);
     if (cores_maps)
         for (i = 0; i < sock_max; i++)
             virBitmapFree(cores_maps[i]);
@@ -615,7 +608,7 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
 {
     virBitmapPtr present_cpus_map = NULL;
     virBitmapPtr online_cpus_map = NULL;
-    DIR *nodedir = NULL;
+    g_autoptr(DIR) nodedir = NULL;
     struct dirent *nodedirent = NULL;
     int nodecpus, nodecores, nodesockets, nodethreads, offline = 0;
     int threads_per_subcore = 0;
@@ -776,7 +769,6 @@ virHostCPUGetInfoPopulateLinux(FILE *cpuinfo,
     ret = 0;
 
  cleanup:
-    VIR_DIR_CLOSE(nodedir);
     virBitmapFree(present_cpus_map);
     virBitmapFree(online_cpus_map);
     VIR_FREE(sysfs_nodedir);
@@ -1119,9 +1111,7 @@ virHostCPUGetAvailableCPUsBitmap(void)
         if ((hostcpus = virHostCPUGetCount()) < 0)
             return NULL;
 
-        if (!(bitmap = virBitmapNew(hostcpus)))
-            return NULL;
-
+        bitmap = virBitmapNew(hostcpus);
         virBitmapSetAll(bitmap);
     }
 
@@ -1389,8 +1379,7 @@ virHostCPUGetTscInfo(void)
         return NULL;
     }
 
-    if (VIR_ALLOC(info) < 0)
-        return NULL;
+    info = g_new0(virHostCPUTscInfo, 1);
 
     info->frequency = rc * 1000ULL;
 

@@ -155,8 +155,7 @@ qemuDomainGetPreservedMounts(virQEMUDriverConfigPtr cfg,
         }
     }
 
-    if (VIR_ALLOC_N(paths, nmounts) < 0)
-        goto error;
+    paths = g_new0(char *, nmounts);
 
     for (i = 0; i < nmounts; i++) {
         if (!(paths[i] = qemuDomainGetPreservedMountPath(cfg, vm, mounts[i])))
@@ -248,7 +247,7 @@ qemuDomainSetupDisk(virStorageSourcePtr src,
             if (!(tmpPath = virPCIDeviceAddressGetIOMMUGroupDev(&next->nvme->pciAddr)))
                 return -1;
         } else {
-            VIR_AUTOSTRINGLIST targetPaths = NULL;
+            g_auto(GStrv) targetPaths = NULL;
 
             if (virStorageSourceIsEmpty(next) ||
                 !virStorageSourceIsLocalStorage(next)) {
@@ -614,7 +613,7 @@ int
 qemuDomainBuildNamespace(virQEMUDriverConfigPtr cfg,
                          virDomainObjPtr vm)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
         VIR_DEBUG("namespaces disabled for domain %s", vm->def->name);
@@ -799,9 +798,8 @@ qemuDomainEnableNamespace(virDomainObjPtr vm,
 {
     qemuDomainObjPrivatePtr priv = vm->privateData;
 
-    if (!priv->namespaces &&
-        !(priv->namespaces = virBitmapNew(QEMU_DOMAIN_NS_LAST)))
-        return -1;
+    if (!priv->namespaces)
+        priv->namespaces = virBitmapNew(QEMU_DOMAIN_NS_LAST);
 
     if (virBitmapSetBit(priv->namespaces, ns) < 0) {
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -1337,7 +1335,7 @@ qemuNamespaceUnlinkPaths(virDomainObjPtr vm,
     qemuDomainObjPrivatePtr priv = vm->privateData;
     virQEMUDriverPtr driver = priv->driver;
     g_autoptr(virQEMUDriverConfig) cfg = NULL;
-    VIR_AUTOSTRINGLIST unlinkPaths = NULL;
+    g_auto(GStrv) unlinkPaths = NULL;
     char **devMountsPath = NULL;
     size_t ndevMountsPath = 0;
     size_t npaths;
@@ -1389,7 +1387,7 @@ int
 qemuDomainNamespaceSetupDisk(virDomainObjPtr vm,
                              virStorageSourcePtr src)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1433,7 +1431,7 @@ int
 qemuDomainNamespaceSetupHostdev(virDomainObjPtr vm,
                                 virDomainHostdevDefPtr hostdev)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1466,7 +1464,7 @@ int
 qemuDomainNamespaceTeardownHostdev(virDomainObjPtr vm,
                                    virDomainHostdevDefPtr hostdev)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1488,7 +1486,7 @@ int
 qemuDomainNamespaceSetupMemory(virDomainObjPtr vm,
                                virDomainMemoryDefPtr mem)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1507,7 +1505,7 @@ int
 qemuDomainNamespaceTeardownMemory(virDomainObjPtr vm,
                                   virDomainMemoryDefPtr mem)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1526,7 +1524,7 @@ int
 qemuDomainNamespaceSetupChardev(virDomainObjPtr vm,
                                 virDomainChrDefPtr chr)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1545,7 +1543,7 @@ int
 qemuDomainNamespaceTeardownChardev(virDomainObjPtr vm,
                                    virDomainChrDefPtr chr)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1564,7 +1562,7 @@ int
 qemuDomainNamespaceSetupRNG(virDomainObjPtr vm,
                             virDomainRNGDefPtr rng)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1583,7 +1581,7 @@ int
 qemuDomainNamespaceTeardownRNG(virDomainObjPtr vm,
                                virDomainRNGDefPtr rng)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1602,7 +1600,7 @@ int
 qemuDomainNamespaceSetupInput(virDomainObjPtr vm,
                               virDomainInputDefPtr input)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;
@@ -1620,7 +1618,7 @@ int
 qemuDomainNamespaceTeardownInput(virDomainObjPtr vm,
                                  virDomainInputDefPtr input)
 {
-    VIR_AUTOSTRINGLIST paths = NULL;
+    g_auto(GStrv) paths = NULL;
 
     if (!qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT))
         return 0;

@@ -99,6 +99,10 @@ static const vshCmdOptDef opts_checkpoint_create[] = {
      .type = VSH_OT_BOOL,
      .help = N_("redefine metadata for existing checkpoint")
     },
+    {.name = "redefine-validate",
+     .type = VSH_OT_BOOL,
+     .help = N_("validate the redefined checkpoint")
+    },
     {.name = "quiesce",
      .type = VSH_OT_BOOL,
      .help = N_("quiesce guest's file systems")
@@ -116,8 +120,12 @@ cmdCheckpointCreate(vshControl *ctl,
     char *buffer = NULL;
     unsigned int flags = 0;
 
+    VSH_REQUIRE_OPTION("redefine-validate", "redefine");
+
     if (vshCommandOptBool(cmd, "redefine"))
         flags |= VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE;
+    if (vshCommandOptBool(cmd, "redefine-validate"))
+        flags |= VIR_DOMAIN_CHECKPOINT_CREATE_REDEFINE_VALIDATE;
     if (vshCommandOptBool(cmd, "quiesce"))
         flags |= VIR_DOMAIN_CHECKPOINT_CREATE_QUIESCE;
 
@@ -581,13 +589,13 @@ virshCheckpointListCollect(vshControl *ctl,
                            bool tree)
 {
     size_t i;
-    char **names = NULL;
     int count = -1;
     virDomainCheckpointPtr *chks;
-    virshCheckpointListPtr checkpointlist = vshMalloc(ctl,
-                                                      sizeof(*checkpointlist));
+    virshCheckpointListPtr checkpointlist = NULL;
     virshCheckpointListPtr ret = NULL;
     unsigned int flags = orig_flags;
+
+    checkpointlist = g_new0(struct virshCheckpointList, 1);
 
     if (from)
         count = virDomainCheckpointListAllChildren(from, &chks, flags);
@@ -601,8 +609,10 @@ virshCheckpointListCollect(vshControl *ctl,
 
     /* When mixing --from and --tree, we also want a copy of from
      * in the list, but with no parent for that one entry.  */
-    checkpointlist->chks = vshCalloc(ctl, count + (tree && from),
-                                     sizeof(*checkpointlist->chks));
+    if (from && tree)
+        checkpointlist->chks = g_new0(struct virshChk, count + 1);
+    else
+        checkpointlist->chks = g_new0(struct virshChk, count);
     checkpointlist->nchks = count;
     for (i = 0; i < count; i++)
         checkpointlist->chks[i].chk = chks[i];
@@ -628,10 +638,6 @@ virshCheckpointListCollect(vshControl *ctl,
 
  cleanup:
     virshCheckpointListFree(checkpointlist);
-    if (names && count > 0)
-        for (i = 0; i < count; i++)
-            VIR_FREE(names[i]);
-    VIR_FREE(names);
     return ret;
 }
 

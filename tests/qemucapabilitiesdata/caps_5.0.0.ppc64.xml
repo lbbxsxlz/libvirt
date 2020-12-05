@@ -52,6 +52,7 @@
   <flag name='usb-storage.removable'/>
   <flag name='ich9-intel-hda'/>
   <flag name='boot-strict'/>
+  <flag name='enable-fips'/>
   <flag name='usb-kbd'/>
   <flag name='msg-timestamp'/>
   <flag name='active-commit'/>
@@ -208,6 +209,9 @@
   <flag name='spapr-tpm-proxy'/>
   <flag name='numa.hmat'/>
   <flag name='blockdev-hostdev-scsi'/>
+  <flag name='fsdev.createmode'/>
+  <flag name='dc390'/>
+  <flag name='am53c974'/>
   <version>5000000</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>42900241</microcodeVersion>

@@ -62,6 +62,7 @@
   <flag name='kvm-pit-lost-tick-policy'/>
   <flag name='boot-strict'/>
   <flag name='pvpanic'/>
+  <flag name='enable-fips'/>
   <flag name='usb-kbd'/>
   <flag name='usb-audio'/>
   <flag name='splash-timeout'/>
@@ -87,6 +88,8 @@
   <flag name='i8042'/>
   <flag name='tcg'/>
   <flag name='pvscsi'/>
+  <flag name='dc390'/>
+  <flag name='am53c974'/>
   <version>1005003</version>
   <kvmVersion>0</kvmVersion>
   <microcodeVersion>43100245</microcodeVersion>

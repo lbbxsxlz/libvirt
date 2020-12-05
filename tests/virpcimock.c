@@ -18,7 +18,8 @@
 
 #include <config.h>
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
+# define VIR_MOCK_LOOKUP_MAIN
 # include "virmock.h"
 # include <unistd.h>
 # include <fcntl.h>
@@ -120,7 +121,7 @@ struct pciDeviceAddress {
     unsigned int device;
     unsigned int function;
 };
-# define ADDR_STR_FMT "%04x:%02x:%02x.%d"
+# define ADDR_STR_FMT "%04x:%02x:%02x.%u"
 
 struct pciDevice {
     struct pciDeviceAddress addr;
@@ -935,7 +936,11 @@ init_syms(void)
     VIR_MOCK_REAL_INIT(__open_2);
 # endif /* ! __GLIBC__ */
     VIR_MOCK_REAL_INIT(close);
+# ifdef __APPLE__
+    VIR_MOCK_REAL_INIT_ALIASED(opendir, "opendir$INODE64");
+# else
     VIR_MOCK_REAL_INIT(opendir);
+# endif
     VIR_MOCK_REAL_INIT(virFileCanonicalizePath);
 }
 
@@ -1078,7 +1083,7 @@ open(const char *path, int flags, ...)
 
 # ifdef __GLIBC__
 /* in some cases this function may not be present in headers, so we need
- * a declaration to silence the complier */
+ * a declaration to silence the compiler */
 int
 __open_2(const char *path, int flags);
 
@@ -1123,6 +1128,8 @@ opendir(const char *path)
 int
 close(int fd)
 {
+    init_syms();
+
     if (remove_fd(fd) < 0)
         return -1;
     return real_close(fd);

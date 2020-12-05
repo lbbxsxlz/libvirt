@@ -165,8 +165,7 @@ virNetDevTapGetRealDeviceName(char *ifname G_GNUC_UNUSED)
         return NULL;
     }
 
-    if (VIR_ALLOC_N(ret, len) < 0)
-        return NULL;
+    ret = g_new0(char, len);
 
     if (sysctl(name, 6, ret, &len, 0, 0) < 0) {
         virReportSystemError(errno,
@@ -181,66 +180,6 @@ virNetDevTapGetRealDeviceName(char *ifname G_GNUC_UNUSED)
     return NULL;
 #endif
 }
-
-
-/**
- * virNetDevProbeVnetHdr:
- * @tapfd: a tun/tap file descriptor
- *
- * Check whether it is safe to enable the IFF_VNET_HDR flag on the
- * tap interface.
- *
- * Setting IFF_VNET_HDR enables QEMU's virtio_net driver to allow
- * guests to pass larger (GSO) packets, with partial checksums, to
- * the host. This greatly increases the achievable throughput.
- *
- * It is only useful to enable this when we're setting up a virtio
- * interface. And it is only *safe* to enable it when we know for
- * sure that a) qemu has support for IFF_VNET_HDR and b) the running
- * kernel implements the TUNGETIFF ioctl(), which qemu needs to query
- * the supplied tapfd.
- *
- * Returns 1 if VnetHdr is supported, 0 if not supported
- */
-#ifdef IFF_VNET_HDR
-static int
-virNetDevProbeVnetHdr(int tapfd)
-{
-# if defined(IFF_VNET_HDR) && defined(TUNGETFEATURES) && defined(TUNGETIFF)
-    unsigned int features;
-    struct ifreq dummy;
-
-    if (ioctl(tapfd, TUNGETFEATURES, &features) != 0) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETFEATURES ioctl() not implemented");
-        return 0;
-    }
-
-    if (!(features & IFF_VNET_HDR)) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETFEATURES ioctl() reports no IFF_VNET_HDR");
-        return 0;
-    }
-
-    /* The kernel will always return -1 at this point.
-     * If TUNGETIFF is not implemented then errno == EBADFD.
-     */
-    if (ioctl(tapfd, TUNGETIFF, &dummy) != -1 || errno != EBADFD) {
-        VIR_INFO("Not enabling IFF_VNET_HDR; "
-                 "TUNGETIFF ioctl() not implemented");
-        return 0;
-    }
-
-    VIR_INFO("Enabling IFF_VNET_HDR");
-
-    return 1;
-# else
-    (void) tapfd;
-    VIR_INFO("Not enabling IFF_VNET_HDR; disabled at build time");
-    return 0;
-# endif
-}
-#endif
 
 
 #ifdef TUNSETIFF
@@ -352,21 +291,11 @@ int virNetDevTapCreate(char **ifname,
 
         ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
         /* If tapfdSize is greater than one, request multiqueue */
-        if (tapfdSize > 1) {
-# ifdef IFF_MULTI_QUEUE
+        if (tapfdSize > 1)
             ifr.ifr_flags |= IFF_MULTI_QUEUE;
-# else
-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
-                           _("Multiqueue devices are not supported on this system"));
-            goto cleanup;
-# endif
-        }
 
-# ifdef IFF_VNET_HDR
-        if ((flags &  VIR_NETDEV_TAP_CREATE_VNET_HDR) &&
-            virNetDevProbeVnetHdr(fd))
+        if (flags &  VIR_NETDEV_TAP_CREATE_VNET_HDR)
             ifr.ifr_flags |= IFF_VNET_HDR;
-# endif
 
         if (virStrcpyStatic(ifr.ifr_name, *ifname) < 0) {
             virReportSystemError(ERANGE,

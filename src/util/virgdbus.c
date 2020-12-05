@@ -54,11 +54,15 @@ virGDBusBusInit(GBusType type, GError **error)
     if (sharedBus) {
         return g_bus_get_sync(type, NULL, error);
     } else {
+        GDBusConnectionFlags dbusFlags =
+                G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+                G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION;
+
         address = g_dbus_address_get_for_bus_sync(type, NULL, error);
-        if (error)
+        if (*error)
             return NULL;
         return g_dbus_connection_new_for_address_sync(address,
-                                                      G_DBUS_CONNECTION_FLAGS_NONE,
+                                                      dbusFlags,
                                                       NULL,
                                                       NULL,
                                                       error);
@@ -181,6 +185,7 @@ virGDBusCloseSystemBus(void)
  * virGDBusCallMethod:
  * @conn: a DBus connection
  * @reply: pointer to receive reply message, or NULL
+ * @replyType: pointer to GVariantType to validate reply data, or NULL
  * @error: libvirt error pointer or NULL
  * @busName: bus identifier of the target service
  * @objectPath: object path of the target service
@@ -198,6 +203,7 @@ virGDBusCloseSystemBus(void)
 int
 virGDBusCallMethod(GDBusConnection *conn,
                    GVariant **reply,
+                   const GVariantType *replyType,
                    virErrorPtr error,
                    const char *busName,
                    const char *objectPath,
@@ -220,7 +226,7 @@ virGDBusCallMethod(GDBusConnection *conn,
                                       ifaceName,
                                       method,
                                       data,
-                                      NULL,
+                                      replyType,
                                       G_DBUS_CALL_FLAGS_NONE,
                                       VIR_DBUS_METHOD_CALL_TIMEOUT_MILIS,
                                       NULL,
@@ -250,6 +256,7 @@ virGDBusCallMethod(GDBusConnection *conn,
 int
 virGDBusCallMethodWithFD(GDBusConnection *conn,
                          GVariant **reply,
+                         const GVariantType *replyType,
                          GUnixFDList **replyFD,
                          virErrorPtr error,
                          const char *busName,
@@ -274,7 +281,7 @@ virGDBusCallMethodWithFD(GDBusConnection *conn,
                                                         ifaceName,
                                                         method,
                                                         data,
-                                                        NULL,
+                                                        replyType,
                                                         G_DBUS_CALL_FLAGS_NONE,
                                                         VIR_DBUS_METHOD_CALL_TIMEOUT_MILIS,
                                                         dataFD,
@@ -307,6 +314,7 @@ virGDBusCallMethodWithFD(GDBusConnection *conn,
 int
 virGDBusCallMethodWithFD(GDBusConnection *conn G_GNUC_UNUSED,
                          GVariant **reply G_GNUC_UNUSED,
+                         const GVariantType *replyType G_GNUC_UNUSED,
                          GUnixFDList **replyFD G_GNUC_UNUSED,
                          virErrorPtr error G_GNUC_UNUSED,
                          const char *busName G_GNUC_UNUSED,
@@ -342,6 +350,7 @@ virGDBusIsServiceInList(const char *listMethod,
 
     rc = virGDBusCallMethod(conn,
                             &reply,
+                            G_VARIANT_TYPE("(as)"),
                             NULL,
                             "org.freedesktop.DBus",
                             "/org/freedesktop/DBus",
@@ -354,8 +363,10 @@ virGDBusIsServiceInList(const char *listMethod,
 
     g_variant_get(reply, "(as)", &iter);
     while (g_variant_iter_loop(iter, "s", &str)) {
-        if (STREQ(str, name))
+        if (STREQ(str, name)) {
+            g_free(str);
             return 0;
+        }
     }
 
     return -2;

@@ -51,10 +51,12 @@ virNetDevOpenvswitchSetTimeout(unsigned int timeout)
     virNetDevOpenvswitchTimeout = timeout;
 }
 
-static void
-virNetDevOpenvswitchAddTimeout(virCommandPtr cmd)
+static virCommandPtr
+virNetDevOpenvswitchCreateCmd(void)
 {
+    virCommandPtr cmd = virCommandNew(OVS_VSCTL);
     virCommandAddArgFormat(cmd, "--timeout=%u", virNetDevOpenvswitchTimeout);
+    return cmd;
 }
 
 /**
@@ -151,8 +153,7 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
                                         ovsport->profileID);
     }
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
+    cmd = virNetDevOpenvswitchCreateCmd();
     virCommandAddArgList(cmd, "--", "--if-exists", "del-port",
                          ifname, "--", "add-port", brname, ifname, NULL);
 
@@ -197,10 +198,8 @@ int virNetDevOpenvswitchAddPort(const char *brname, const char *ifname,
  */
 int virNetDevOpenvswitchRemovePort(const char *brname G_GNUC_UNUSED, const char *ifname)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--", "--if-exists", "del-port", ifname, NULL);
 
     if (virCommandRun(cmd, NULL) < 0) {
@@ -224,10 +223,8 @@ int virNetDevOpenvswitchRemovePort(const char *brname G_GNUC_UNUSED, const char 
 int virNetDevOpenvswitchGetMigrateData(char **migrate, const char *ifname)
 {
     size_t len;
-    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--if-exists", "get", "Interface",
                          ifname, "external_ids:PortData", NULL);
 
@@ -267,8 +264,7 @@ int virNetDevOpenvswitchSetMigrateData(char *migrate, const char *ifname)
         return 0;
     }
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
+    cmd = virNetDevOpenvswitchCreateCmd();
     virCommandAddArgList(cmd, "set", "Interface", ifname, NULL);
     virCommandAddArgFormat(cmd, "external_ids:PortData=%s", migrate);
 
@@ -370,11 +366,9 @@ int
 virNetDevOpenvswitchInterfaceStats(const char *ifname,
                                    virDomainInterfaceStatsPtr stats)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
     g_autofree char *output = NULL;
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "--if-exists", "--format=list", "--data=json",
                          "--no-headings", "--columns=statistics", "list",
                          "Interface", ifname, NULL);
@@ -434,13 +428,11 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
 int
 virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
 {
-    virCommandPtr cmd = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
     int exitstatus;
 
     *master = NULL;
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd, "iface-to-br", ifname, NULL);
     virCommandSetOutputBuffer(cmd, master);
 
@@ -469,11 +461,22 @@ virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
 
 
 /**
- * virNetDevOpenvswitchVhostuserGetIfname:
+ * virNetDevOpenvswitchGetVhostuserIfname:
  * @path: the path of the unix socket
+ * @server: true if OVS creates the @path
  * @ifname: the retrieved name of the interface
  *
- * Retrieves the ovs ifname from vhostuser unix socket path.
+ * Retrieves the OVS ifname from vhostuser UNIX socket path.
+ * There are two types of vhostuser ports which differ in client/server
+ * role:
+ *
+ * dpdkvhostuser - OVS creates the socket and QEMU connects to it
+ *                 (@server = true)
+ * dpdkvhostuserclient - QEMU creates the socket and OVS connects to it
+ *                       (@server = false)
+ *
+ * Since the way of retrieving ifname is different in these two cases,
+ * caller must set @server according to the interface definition.
  *
  * Returns: 1 if interface is an openvswitch interface,
  *          0 if it is not, but no other error occurred,
@@ -481,33 +484,44 @@ virNetDevOpenvswitchInterfaceGetMaster(const char *ifname, char **master)
  */
 int
 virNetDevOpenvswitchGetVhostuserIfname(const char *path,
+                                       bool server,
                                        char **ifname)
 {
-    const char *tmpIfname = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
     int status;
-    g_autoptr(virCommand) cmd = NULL;
 
-    /* Openvswitch vhostuser path are hardcoded to
-     * /<runstatedir>/openvswitch/<ifname>
-     * for example: /var/run/openvswitch/dpdkvhostuser0
-     *
-     * so we pick the filename and check it's a openvswitch interface
-     */
-    if (!path ||
-        !(tmpIfname = strrchr(path, '/')))
-        return 0;
 
-    tmpIfname++;
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
-    virCommandAddArgList(cmd, "get", "Interface", tmpIfname, "name", NULL);
-    if (virCommandRun(cmd, &status) < 0 ||
-        status) {
+    if (server) {
+        virCommandAddArgList(cmd, "--no-headings", "--columns=name", "find",
+                             "Interface", NULL);
+        virCommandAddArgPair(cmd, "options:vhost-server-path", "path");
+    } else {
+        const char *tmpIfname = NULL;
+
+        /* Openvswitch vhostuser path is hardcoded to
+         * /<runstatedir>/openvswitch/<ifname>
+         * for example: /var/run/openvswitch/dpdkvhostuser0
+         *
+         * so we pick the filename and check it's an openvswitch interface
+         */
+        if (!path ||
+            !(tmpIfname = strrchr(path, '/'))) {
+            return 0;
+        }
+
+        tmpIfname++;
+        virCommandAddArgList(cmd, "get", "Interface", tmpIfname, "name", NULL);
+    }
+
+    virCommandSetOutputBuffer(cmd, ifname);
+    if (virCommandRun(cmd, &status) < 0)
+        return -1;
+
+    if (status != 0) {
         /* it's not a openvswitch vhostuser interface. */
         return 0;
     }
 
-    *ifname = g_strdup(tmpIfname);
     return 1;
 }
 
@@ -523,10 +537,8 @@ virNetDevOpenvswitchGetVhostuserIfname(const char *path,
 int virNetDevOpenvswitchUpdateVlan(const char *ifname,
                                    const virNetDevVlan *virtVlan)
 {
-    g_autoptr(virCommand) cmd = NULL;
+    g_autoptr(virCommand) cmd = virNetDevOpenvswitchCreateCmd();
 
-    cmd = virCommandNew(OVS_VSCTL);
-    virNetDevOpenvswitchAddTimeout(cmd);
     virCommandAddArgList(cmd,
                          "--", "--if-exists", "clear", "Port", ifname, "tag",
                          "--", "--if-exists", "clear", "Port", ifname, "trunk",

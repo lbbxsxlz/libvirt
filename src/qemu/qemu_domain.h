@@ -244,7 +244,7 @@ struct _qemuDomainObjPrivate {
     bool memPrealloc;
 
     /* running block jobs */
-    virHashTablePtr blockjobs;
+    GHashTable *blockjobs;
 
     bool disableSlirp;
 
@@ -263,6 +263,10 @@ struct _qemuDomainObjPrivate {
     char **dbusVMStateIds;
     /* true if -object dbus-vmstate was added */
     bool dbusVMState;
+
+    /* prevent deletion of <transient> disk overlay files between startup and
+     * succesful setup of the overlays */
+    bool inhibitDiskTransientDelete;
 };
 
 #define QEMU_DOMAIN_PRIVATE(vm) \
@@ -563,7 +567,8 @@ void qemuDomainObjTaint(virQEMUDriverPtr driver,
 
 void qemuDomainObjCheckTaint(virQEMUDriverPtr driver,
                              virDomainObjPtr obj,
-                             qemuDomainLogContextPtr logCtxt);
+                             qemuDomainLogContextPtr logCtxt,
+                             bool incomingMigration);
 void qemuDomainObjCheckDiskTaint(virQEMUDriverPtr driver,
                                  virDomainObjPtr obj,
                                  virDomainDiskDefPtr disk,
@@ -608,7 +613,7 @@ int qemuDomainSnapshotWriteMetadata(virDomainObjPtr vm,
                                     const char *snapshotDir);
 
 int qemuDomainSnapshotForEachQcow2(virQEMUDriverPtr driver,
-                                   virDomainObjPtr vm,
+                                   virDomainDefPtr def,
                                    virDomainMomentObjPtr snap,
                                    const char *op,
                                    bool try_all);
@@ -633,7 +638,7 @@ struct _virQEMUMomentRemove {
 };
 
 int qemuDomainMomentDiscardAll(void *payload,
-                               const void *name,
+                               const char *name,
                                void *data);
 
 int qemuDomainSnapshotDiscardAllMetadata(virQEMUDriverPtr driver,
@@ -751,11 +756,9 @@ bool qemuDomainDiskBlockJobIsActive(virDomainDiskDefPtr disk);
 bool qemuDomainHasBlockjob(virDomainObjPtr vm, bool copy_only)
     ATTRIBUTE_NONNULL(1);
 
-unsigned long long qemuDomainGetMemorySizeAlignment(const virDomainDef *def);
-
 int qemuDomainAlignMemorySizes(virDomainDefPtr def);
-void qemuDomainMemoryDeviceAlignSize(virDomainDefPtr def,
-                                     virDomainMemoryDefPtr mem);
+int qemuDomainMemoryDeviceAlignSize(virDomainDefPtr def,
+                                    virDomainMemoryDefPtr mem);
 
 virDomainChrDefPtr qemuFindAgentConfig(virDomainDefPtr def);
 
@@ -777,6 +780,7 @@ bool qemuDomainIsPSeries(const virDomainDef *def);
 bool qemuDomainHasPCIRoot(const virDomainDef *def);
 bool qemuDomainHasPCIeRoot(const virDomainDef *def);
 bool qemuDomainHasBuiltinIDE(const virDomainDef *def);
+bool qemuDomainHasBuiltinESP(const virDomainDef *def);
 bool qemuDomainNeedsFDC(const virDomainDef *def);
 bool qemuDomainSupportsPCI(virDomainDefPtr def,
                            virQEMUCapsPtr qemuCaps);
@@ -791,7 +795,6 @@ int qemuDomainAdjustMaxMemLockHostdev(virDomainObjPtr vm,
                                       virDomainHostdevDefPtr hostdev);
 
 int qemuDomainDefValidateMemoryHotplug(const virDomainDef *def,
-                                       virQEMUCapsPtr qemuCaps,
                                        const virDomainMemoryDef *mem);
 
 bool qemuDomainSupportsNewVcpuHotplug(virDomainObjPtr vm);
@@ -1043,3 +1046,12 @@ qemuDomainOpenFile(virQEMUDriverPtr driver,
 int
 qemuDomainFileWrapperFDClose(virDomainObjPtr vm,
                              virFileWrapperFdPtr fd);
+
+int
+qemuDomainInterfaceSetDefaultQDisc(virQEMUDriverPtr driver,
+                                   virDomainNetDefPtr net);
+
+int
+qemuDomainNamePathsCleanup(virQEMUDriverConfigPtr cfg,
+                           const char *name,
+                           bool bestEffort);

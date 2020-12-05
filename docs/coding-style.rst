@@ -131,7 +131,7 @@ around operators and keywords:
 
   indent-libvirt()
   {
-    indent -bad -bap -bbb -bli4 -br -ce -brs -cs -i4 -l75 -lc75 \
+    indent -bad -bap -bbb -bli4 -br -ce -brs -cs -i4 -l100 -lc100 \
            -sbi4 -psl -saf -sai -saw -sbi4 -ss -sc -cdw -cli4 -npcs -nbc \
            --no-tabs "$@"
   }
@@ -140,6 +140,9 @@ Note that sometimes you'll have to post-process that output
 further, by piping it through ``expand -i``, since some leading
 TABs can get through. Usually they're in macro definitions or
 strings, and should be converted anyhow.
+
+The maximum permitted line length is 100 characters, but lines
+should aim to be approximately 80 characters.
 
 Libvirt requires a C99 compiler for various reasons. However, most
 of the code base prefers to stick to C89 syntax unless there is a
@@ -960,3 +963,18 @@ git):
    cleanup:
       /* ... do other stuff ... */
   }
+
+
+XML element and attribute naming
+--------------------------------
+
+New elements and/or attributes should be short and descriptive.
+In general, they should reflect what the feature does instead of
+how exactly it is named in given hypervisor because this creates
+an abstraction that other drivers can benefit from (for instance
+if the same feature is named differently in two hypervisors).
+That is not to say an element or attribute can't have the same
+name as in a hypervisor, but proceed with caution.
+
+Single worded names are preferred, but if more words must be
+used then they shall be joined in camelCase style.

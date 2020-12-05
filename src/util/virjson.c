@@ -438,8 +438,7 @@ virJSONValueNewString(const char *data)
     if (!data)
         return virJSONValueNewNull();
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virJSONValue, 1);
 
     val->type = VIR_JSON_TYPE_STRING;
     val->data.string = g_strdup(data);
@@ -457,8 +456,7 @@ virJSONValueNewStringLen(const char *data,
     if (!data)
         return virJSONValueNewNull();
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virJSONValue, 1);
 
     val->type = VIR_JSON_TYPE_STRING;
     val->data.string = g_strndup(data, length);
@@ -472,8 +470,7 @@ virJSONValueNewNumber(const char *data)
 {
     virJSONValuePtr val;
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virJSONValue, 1);
 
     val->type = VIR_JSON_TYPE_NUMBER;
     val->data.number = g_strdup(data);
@@ -533,8 +530,7 @@ virJSONValueNewBoolean(int boolean_)
 {
     virJSONValuePtr val;
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virJSONValue, 1);
 
     val->type = VIR_JSON_TYPE_BOOLEAN;
     val->data.boolean = boolean_;
@@ -548,8 +544,7 @@ virJSONValueNewNull(void)
 {
     virJSONValuePtr val;
 
-    if (VIR_ALLOC(val) < 0)
-        return NULL;
+    val = g_new0(virJSONValue, 1);
 
     val->type = VIR_JSON_TYPE_NULL;
 
@@ -1257,8 +1252,7 @@ virJSONValueGetArrayAsBitmap(const virJSONValue *val,
             maxelem = elems[i];
     }
 
-    if (!(*bitmap = virBitmapNewQuiet(maxelem + 1)))
-        return -1;
+    *bitmap = virBitmapNew(maxelem + 1);
 
     /* second pass sets the correct bits in the map */
     for (i = 0; i < val->data.array.nvalues; i++)
@@ -1469,6 +1463,47 @@ virJSONValueObjectIsNull(virJSONValuePtr object,
     return virJSONValueIsNull(val);
 }
 
+char **
+virJSONValueObjectGetStringArray(virJSONValuePtr object, const char *key)
+{
+    g_auto(GStrv) ret = NULL;
+    virJSONValuePtr data;
+    size_t n;
+    size_t i;
+
+    data = virJSONValueObjectGetArray(object, key);
+    if (!data) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("%s is missing or not an array"),
+                       key);
+        return NULL;
+    }
+
+    n = virJSONValueArraySize(data);
+    ret = g_new0(char *, n + 1);
+    for (i = 0; i < n; i++) {
+        virJSONValuePtr child = virJSONValueArrayGet(data, i);
+        const char *tmp;
+
+        if (!child) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s array element is missing item %zu"),
+                           key, i);
+            return NULL;
+        }
+
+        if (!(tmp = virJSONValueGetString(child))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("%s array element does not contain a string"),
+                           key);
+            return NULL;
+        }
+
+        ret[i] = g_strdup(tmp);
+    }
+
+    return g_steal_pointer(&ret);
+}
 
 /**
  * virJSONValueObjectForeachKeyValue:
@@ -2077,7 +2112,7 @@ virJSONValueObjectDeflattenWorker(const char *key,
     virJSONValuePtr retobj = opaque;
     g_autoptr(virJSONValue) newval = NULL;
     virJSONValuePtr existobj;
-    VIR_AUTOSTRINGLIST tokens = NULL;
+    g_auto(GStrv) tokens = NULL;
     size_t ntokens = 0;
 
     /* non-nested keys only need to be copied */

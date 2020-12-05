@@ -130,7 +130,7 @@ static virStorageVolPtr
 fakeStorageVolLookupByName(virStoragePoolPtr pool,
                            const char *name)
 {
-    VIR_AUTOSTRINGLIST volinfo = NULL;
+    g_auto(GStrv) volinfo = NULL;
     virStorageVolPtr ret = NULL;
 
     if (STREQ(pool->name, "inactive")) {
@@ -380,7 +380,7 @@ testCheckExclusiveFlags(int flags)
 {
     virCheckFlags(FLAG_EXPECT_FAILURE |
                   FLAG_EXPECT_PARSE_ERROR |
-                  FLAG_FIPS |
+                  FLAG_FIPS_HOST |
                   FLAG_REAL_CAPS |
                   FLAG_SKIP_LEGACY_CPUS |
                   FLAG_SLIRP_HELPER |
@@ -399,7 +399,24 @@ testCompareXMLToArgvCreateArgs(virQEMUDriverPtr drv,
                                unsigned int flags,
                                bool jsonPropsValidation)
 {
+    qemuDomainObjPrivatePtr priv = vm->privateData;
+    bool enableFips = !!(flags & FLAG_FIPS_HOST);
     size_t i;
+
+    if (qemuProcessCreatePretendCmdPrepare(drv, vm, migrateURI, false,
+                                           VIR_QEMU_PROCESS_START_COLD) < 0)
+        return NULL;
+
+    for (i = 0; i < vm->def->ndisks; i++) {
+        virDomainDiskDefPtr disk = vm->def->disks[i];
+
+        /* host cdrom requires special treatment in qemu, mock it */
+        if (disk->device == VIR_DOMAIN_DISK_DEVICE_CDROM &&
+            disk->src->format == VIR_STORAGE_FILE_RAW &&
+            virStorageSourceIsBlockLocal(disk->src) &&
+            STREQ(disk->src->path, "/dev/cdrom"))
+            disk->src->hostcdrom = true;
+    }
 
     for (i = 0; i < vm->def->nhostdevs; i++) {
         virDomainHostdevDefPtr hostdev = vm->def->hostdevs[i];
@@ -408,6 +425,24 @@ testCompareXMLToArgvCreateArgs(virQEMUDriverPtr drv,
             hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI &&
             hostdev->source.subsys.u.pci.backend == VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT) {
             hostdev->source.subsys.u.pci.backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_VFIO;
+        }
+
+        if (virHostdevIsSCSIDevice(hostdev)) {
+            virDomainHostdevSubsysSCSIPtr scsisrc = &hostdev->source.subsys.u.scsi;
+
+            switch ((virDomainHostdevSCSIProtocolType) scsisrc->protocol) {
+            case VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_NONE:
+                scsisrc->u.host.src->path = g_strdup("/dev/sg0");
+                break;
+
+            case VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI:
+                break;
+
+            case VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_LAST:
+            default:
+                virReportEnumRangeError(virDomainHostdevSCSIProtocolType, scsisrc->protocol);
+                return NULL;
+            }
         }
     }
 
@@ -466,10 +501,13 @@ testCompareXMLToArgvCreateArgs(virQEMUDriverPtr drv,
         }
     }
 
-    return qemuProcessCreatePretendCmd(drv, vm, migrateURI,
-                                       (flags & FLAG_FIPS), false,
-                                       jsonPropsValidation,
-                                       VIR_QEMU_PROCESS_START_COLD);
+    /* we can't use qemuCheckFips() directly as it queries host state */
+    if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_ENABLE_FIPS))
+        enableFips = false;
+
+    return qemuProcessCreatePretendCmdBuild(drv, vm, migrateURI,
+                                            enableFips, false,
+                                            jsonPropsValidation);
 }
 
 
@@ -479,11 +517,11 @@ testCompareXMLToArgvValidateSchema(virQEMUDriverPtr drv,
                                    struct testQemuInfo *info,
                                    unsigned int flags)
 {
-    VIR_AUTOSTRINGLIST args = NULL;
+    g_auto(GStrv) args = NULL;
     g_autoptr(virDomainObj) vm = NULL;
     size_t nargs = 0;
     size_t i;
-    g_autoptr(virHashTable) schema = NULL;
+    g_autoptr(GHashTable) schema = NULL;
     g_autoptr(virCommand) cmd = NULL;
     unsigned int parseFlags = info->parseFlags;
 
@@ -565,6 +603,7 @@ testCompareXMLToArgv(const void *data)
     virDomainObjPtr vm = NULL;
     virDomainChrSourceDef monitor_chr;
     g_autoptr(virConnect) conn = NULL;
+    virError *err = NULL;
     char *log = NULL;
     g_autoptr(virCommand) cmd = NULL;
     qemuDomainObjPrivatePtr priv = NULL;
@@ -587,9 +626,6 @@ testCompareXMLToArgv(const void *data)
     virSetConnectNodeDev(conn);
     virSetConnectSecret(conn);
     virSetConnectStorage(conn);
-
-    if (virQEMUCapsGet(info->qemuCaps, QEMU_CAPS_ENABLE_FIPS))
-        flags |= FLAG_FIPS;
 
     if (testCheckExclusiveFlags(info->flags) < 0)
         goto cleanup;
@@ -615,8 +651,16 @@ testCompareXMLToArgv(const void *data)
     if (!(vm->def = virDomainDefParseFile(info->infile,
                                           driver.xmlopt,
                                           NULL, parseFlags))) {
-        if (flags & FLAG_EXPECT_PARSE_ERROR)
-            goto ok;
+        err = virGetLastError();
+        if (!err) {
+            VIR_TEST_DEBUG("no error was reported for expected parse error");
+            goto cleanup;
+        }
+        if (flags & FLAG_EXPECT_PARSE_ERROR) {
+            g_autofree char *tmperr = g_strdup_printf("%s\n", NULLSTR(err->message));
+            if (virTestCompareToFile(tmperr, info->errfile) >= 0)
+                goto ok;
+        }
         goto cleanup;
     }
     if (flags & FLAG_EXPECT_PARSE_ERROR) {
@@ -651,8 +695,16 @@ testCompareXMLToArgv(const void *data)
 
     if (!(cmd = testCompareXMLToArgvCreateArgs(&driver, vm, migrateURI, info,
                                                flags, false))) {
-        if (flags & FLAG_EXPECT_FAILURE)
-            goto ok;
+        err = virGetLastError();
+        if (!err) {
+            VIR_TEST_DEBUG("no error was reported for expected failure");
+            goto cleanup;
+        }
+        if (flags & FLAG_EXPECT_FAILURE) {
+            g_autofree char *tmperr = g_strdup_printf("%s\n", NULLSTR(err->message));
+            if (virTestCompareToFile(tmperr, info->errfile) >= 0)
+                goto ok;
+        }
         goto cleanup;
     }
     if (flags & FLAG_EXPECT_FAILURE) {
@@ -704,6 +756,8 @@ testInfoSetPaths(struct testQemuInfo *info,
                                    abs_srcdir, info->name);
     info->outfile = g_strdup_printf("%s/qemuxml2argvdata/%s%s.args",
                                     abs_srcdir, info->name, suffix ? suffix : "");
+    info->errfile = g_strdup_printf("%s/qemuxml2argvdata/%s%s.err",
+                                      abs_srcdir, info->name, suffix ? suffix : "");
 }
 
 # define FAKEROOTDIRTEMPLATE abs_builddir "/fakerootdir-XXXXXX"
@@ -713,7 +767,7 @@ mymain(void)
 {
     int ret = 0;
     g_autofree char *fakerootdir = NULL;
-    g_autoptr(virHashTable) capslatest = NULL;
+    g_autoptr(GHashTable) capslatest = NULL;
 
     fakerootdir = g_strdup(FAKEROOTDIRTEMPLATE);
 
@@ -753,8 +807,7 @@ mymain(void)
     driver.config->nbdTLSx509certdir = g_strdup("/etc/pki/libvirt-nbd/dummy,path");
 
     VIR_FREE(driver.config->hugetlbfs);
-    if (VIR_ALLOC_N(driver.config->hugetlbfs, 2) < 0)
-        return EXIT_FAILURE;
+    driver.config->hugetlbfs = g_new0(virHugeTLBFS, 2);
     driver.config->nhugetlbfs = 2;
     driver.config->hugetlbfs[0].mnt_dir = g_strdup("/dev/hugepages2M");
     driver.config->hugetlbfs[1].mnt_dir = g_strdup("/dev/hugepages1G");
@@ -908,6 +961,7 @@ mymain(void)
     g_setenv("USER", "test", TRUE);
     g_setenv("LOGNAME", "test", TRUE);
     g_setenv("HOME", "/home/test", TRUE);
+    g_setenv("LC_ALL", "C", TRUE);
     g_unsetenv("TMPDIR");
     g_unsetenv("LD_PRELOAD");
     g_unsetenv("LD_LIBRARY_PATH");
@@ -1126,6 +1180,8 @@ mymain(void)
             QEMU_CAPS_DEVICE_ZPCI,
             QEMU_CAPS_CCW,
             QEMU_CAPS_VIRTIO_S390);
+    DO_TEST_PARSE_ERROR("non-x86_64-timer-error",
+                        QEMU_CAPS_VIRTIO_S390);
     DO_TEST("disk-order", QEMU_CAPS_VIRTIO_BLK_SCSI);
     DO_TEST("disk-virtio-queues",
             QEMU_CAPS_VIRTIO_BLK_NUM_QUEUES);
@@ -1154,6 +1210,8 @@ mymain(void)
     DO_TEST_CAPS_VER("disk-cache", "2.7.0");
     DO_TEST_CAPS_VER("disk-cache", "2.12.0");
     DO_TEST_CAPS_LATEST("disk-cache");
+    DO_TEST_CAPS_ARCH_VER_PARSE_ERROR("disk-transient", "x86_64", "4.1.0");
+    DO_TEST_CAPS_LATEST("disk-transient");
     DO_TEST("disk-network-nbd", NONE);
     DO_TEST_CAPS_VER("disk-network-nbd", "2.12.0");
     DO_TEST_CAPS_LATEST("disk-network-nbd");
@@ -1197,14 +1255,14 @@ mymain(void)
     DO_TEST_PARSE_ERROR("disk-device-lun-type-invalid",
                         QEMU_CAPS_VIRTIO_SCSI);
     DO_TEST_CAPS_LATEST_PARSE_ERROR("disk-attaching-partition-nosupport");
-    DO_TEST_FAILURE("disk-usb-nosupport", NONE);
+    DO_TEST_PARSE_ERROR("disk-usb-nosupport", NONE);
     DO_TEST("disk-usb-device",
             QEMU_CAPS_DEVICE_USB_STORAGE);
     DO_TEST("disk-usb-device-removable",
             QEMU_CAPS_DEVICE_USB_STORAGE,
             QEMU_CAPS_USB_STORAGE_REMOVABLE);
-    DO_TEST_FAILURE("disk-usb-pci",
-                    QEMU_CAPS_DEVICE_USB_STORAGE);
+    DO_TEST_PARSE_ERROR("disk-usb-pci",
+                        QEMU_CAPS_DEVICE_USB_STORAGE);
     DO_TEST_CAPS_LATEST("disk-scsi");
     DO_TEST_CAPS_VER("disk-scsi-device-auto", "1.5.3");
     DO_TEST_CAPS_LATEST("disk-scsi-device-auto");
@@ -1422,7 +1480,8 @@ mymain(void)
     DO_TEST("net-virtio-rxtxqueuesize",
             QEMU_CAPS_VIRTIO_NET_RX_QUEUE_SIZE,
             QEMU_CAPS_VIRTIO_NET_TX_QUEUE_SIZE);
-    DO_TEST_PARSE_ERROR("net-virtio-rxqueuesize-invalid-size", NONE);
+    DO_TEST_PARSE_ERROR("net-virtio-rxqueuesize-invalid-size",
+                        QEMU_CAPS_VIRTIO_NET_RX_QUEUE_SIZE);
     DO_TEST("net-virtio-teaming",
             QEMU_CAPS_VIRTIO_NET_FAILOVER,
             QEMU_CAPS_DEVICE_VFIO_PCI);
@@ -1446,6 +1505,7 @@ mymain(void)
             QEMU_CAPS_DEVICE_VFIO_PCI);
     DO_TEST_FAILURE("net-hostdev-fail",
                     QEMU_CAPS_DEVICE_VFIO_PCI);
+    DO_TEST_CAPS_LATEST("net-vdpa");
 
     DO_TEST("hostdev-pci-multifunction",
             QEMU_CAPS_KVM,
@@ -1865,7 +1925,7 @@ mymain(void)
     DO_TEST_PARSE_ERROR("cpu-numa-disjoint", NONE);
     DO_TEST("cpu-numa-disjoint", QEMU_CAPS_NUMA);
     DO_TEST_FAILURE("cpu-numa-memshared", QEMU_CAPS_OBJECT_MEMORY_RAM);
-    DO_TEST_PARSE_ERROR("cpu-numa-memshared", NONE);
+    DO_TEST_PARSE_ERROR("cpu-numa-memshared-1", NONE);
     DO_TEST("cpu-numa-memshared", QEMU_CAPS_OBJECT_MEMORY_FILE);
     DO_TEST("cpu-host-model", NONE);
     DO_TEST("cpu-host-model-vendor", NONE);
@@ -1893,6 +1953,7 @@ mymain(void)
     DO_TEST_CAPS_VER("cpu-host-model-cmt", "4.0.0");
     DO_TEST("cpu-tsc-frequency", QEMU_CAPS_KVM);
     DO_TEST_CAPS_VER("cpu-tsc-frequency", "4.0.0");
+    DO_TEST_CAPS_LATEST("cpu-tsc-high-frequency");
     DO_TEST_CAPS_VER("cpu-translation", "4.0.0");
     DO_TEST_CAPS_LATEST("cpu-translation");
     qemuTestSetHostCPU(&driver, driver.hostarch, NULL);
@@ -2041,8 +2102,8 @@ mymain(void)
     DO_TEST("pseries-panic-no-address",
             QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
             QEMU_CAPS_DEVICE_SPAPR_VTY);
-    DO_TEST_FAILURE("pseries-panic-address",
-                    QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
+    DO_TEST_PARSE_ERROR("pseries-panic-address",
+                        QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
 
     DO_TEST("pseries-phb-simple",
             QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
@@ -2092,7 +2153,7 @@ mymain(void)
             QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-htp-resize",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
@@ -2103,7 +2164,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_CAP_IBS);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-hpt-pagesize",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_NESTED_HV,
@@ -2114,7 +2175,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_CAP_HTM */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-htm",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_NESTED_HV,
@@ -2125,7 +2186,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_CAP_NESTED_HV */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-nested-hv",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
@@ -2136,7 +2197,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_CAP_CCF_ASSIST */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-ccf",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
@@ -2147,7 +2208,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_CFPC */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-cfpc",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
@@ -2158,7 +2219,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_CAP_IBS);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_SBBC */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-sbbc",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
@@ -2169,7 +2230,7 @@ mymain(void)
                         QEMU_CAPS_MACHINE_PSERIES_CAP_IBS);
 
     /* parse error: no QEMU_CAPS_MACHINE_PSERIES_IBS */
-    DO_TEST_PARSE_ERROR("pseries-features",
+    DO_TEST_PARSE_ERROR("pseries-features-ibs",
                         QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
                         QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT,
                         QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
@@ -2229,7 +2290,9 @@ mymain(void)
     DO_TEST_PARSE_ERROR("mach-virt-serial-invalid-machine", NONE);
 
     DO_TEST("disk-ide-split", NONE);
-    DO_TEST("disk-ide-wwn", QEMU_CAPS_IDE_DRIVE_WWN);
+    DO_TEST("disk-ide-wwn",
+            QEMU_CAPS_IDE_DRIVE_WWN,
+            QEMU_CAPS_SCSI_DISK_WWN);
 
     DO_TEST("disk-geometry", NONE);
     DO_TEST("disk-blockio", QEMU_CAPS_BLOCKIO);
@@ -2352,9 +2415,9 @@ mymain(void)
     DO_TEST("s390-panic-no-address",
             QEMU_CAPS_CCW,
             QEMU_CAPS_VIRTIO_S390);
-    DO_TEST_FAILURE("s390-panic-address",
-            QEMU_CAPS_CCW,
-            QEMU_CAPS_VIRTIO_S390);
+    DO_TEST_PARSE_ERROR("s390-panic-address",
+                        QEMU_CAPS_CCW,
+                        QEMU_CAPS_VIRTIO_S390);
     DO_TEST("s390-panic-missing",
             QEMU_CAPS_CCW,
             QEMU_CAPS_VIRTIO_S390);
@@ -2866,9 +2929,9 @@ mymain(void)
             QEMU_CAPS_DEVICE_VIRTIO_MMIO,
             QEMU_CAPS_DEVICE_PL011,
             QEMU_CAPS_KVM, QEMU_CAPS_CPU_AARCH64_OFF);
-    DO_TEST_FAILURE("aarch64-kvm-32-on-64",
-            QEMU_CAPS_DEVICE_VIRTIO_MMIO,
-            QEMU_CAPS_KVM);
+    DO_TEST_PARSE_ERROR("aarch64-kvm-32-on-64",
+                        QEMU_CAPS_DEVICE_VIRTIO_MMIO,
+                        QEMU_CAPS_KVM);
     DO_TEST("aarch64-pci-serial",
             QEMU_CAPS_DEVICE_PCI_SERIAL,
             QEMU_CAPS_CHARDEV_LOGFILE,
@@ -2914,13 +2977,14 @@ mymain(void)
     DO_TEST("panic-no-address",
             QEMU_CAPS_DEVICE_PANIC);
 
-    DO_TEST("fips-enabled", QEMU_CAPS_ENABLE_FIPS);
+    DO_TEST_CAPS_ARCH_VER_FULL("fips-enabled", "x86_64", "5.1.0", ARG_FLAGS, FLAG_FIPS_HOST);
+    DO_TEST_CAPS_ARCH_LATEST_FULL("fips-enabled", "x86_64", ARG_FLAGS, FLAG_FIPS_HOST);
 
     DO_TEST("shmem", QEMU_CAPS_DEVICE_IVSHMEM);
     DO_TEST("shmem-plain-doorbell", QEMU_CAPS_DEVICE_IVSHMEM,
             QEMU_CAPS_DEVICE_IVSHMEM_PLAIN,
             QEMU_CAPS_DEVICE_IVSHMEM_DOORBELL);
-    DO_TEST_FAILURE("shmem", NONE);
+    DO_TEST_PARSE_ERROR("shmem", NONE);
     DO_TEST_FAILURE("shmem-invalid-size",
                     QEMU_CAPS_DEVICE_IVSHMEM);
     DO_TEST_FAILURE("shmem-invalid-address",
@@ -2941,13 +3005,29 @@ mymain(void)
     DO_TEST("memory-hotplug-ppc64-nonuma", QEMU_CAPS_KVM, QEMU_CAPS_DEVICE_PC_DIMM, QEMU_CAPS_NUMA,
             QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
             QEMU_CAPS_OBJECT_MEMORY_RAM, QEMU_CAPS_OBJECT_MEMORY_FILE);
+    DO_TEST_FULL("memory-hotplug-ppc64-nonuma-abi-update",
+                 ARG_PARSEFLAGS, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
+                 ARG_QEMU_CAPS,
+                 QEMU_CAPS_KVM, QEMU_CAPS_DEVICE_PC_DIMM,
+                 QEMU_CAPS_NUMA, QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+                 QEMU_CAPS_OBJECT_MEMORY_RAM,
+                 QEMU_CAPS_OBJECT_MEMORY_FILE);
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm");
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm-access");
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm-label");
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm-align");
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm-pmem");
     DO_TEST_CAPS_LATEST("memory-hotplug-nvdimm-readonly");
-    DO_TEST_CAPS_ARCH_LATEST("memory-hotplug-nvdimm-ppc64", "ppc64");
+    DO_TEST("memory-hotplug-nvdimm-ppc64", QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+                                           QEMU_CAPS_OBJECT_MEMORY_FILE,
+                                           QEMU_CAPS_DEVICE_NVDIMM);
+    DO_TEST_FULL("memory-hotplug-nvdimm-ppc64-abi-update",
+                 ARG_PARSEFLAGS, VIR_DOMAIN_DEF_PARSE_ABI_UPDATE,
+                 ARG_QEMU_CAPS,
+                 QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+                 QEMU_CAPS_OBJECT_MEMORY_FILE,
+                 QEMU_CAPS_DEVICE_NVDIMM,
+                 QEMU_CAPS_LAST);
 
     DO_TEST("machine-aeskeywrap-on-caps",
             QEMU_CAPS_AES_KEY_WRAP,
@@ -3097,6 +3177,9 @@ mymain(void)
             QEMU_CAPS_OBJECT_GPEX,
             QEMU_CAPS_NEC_USB_XHCI);
 
+    DO_TEST("sparc-minimal",
+            QEMU_CAPS_SCSI_NCR53C90);
+
     /* VM XML has invalid arch/ostype/virttype combo, but the SKIP flag
      * will avoid the error during parse. This will cause us to fill in
      * the missing machine type using the i386 binary, despite it being
@@ -3172,6 +3255,7 @@ mymain(void)
     DO_TEST_CAPS_LATEST("virtio-options-fs-packed");
     DO_TEST_CAPS_LATEST("virtio-options-input-packed");
     DO_TEST_CAPS_LATEST("virtio-options-memballoon-packed");
+    DO_TEST_CAPS_LATEST("virtio-options-memballoon-freepage-reporting");
     DO_TEST_CAPS_LATEST("virtio-options-net-packed");
     DO_TEST_CAPS_LATEST("virtio-options-rng-packed");
     DO_TEST_CAPS_LATEST("virtio-options-video-packed");
@@ -3209,6 +3293,7 @@ mymain(void)
     DO_TEST_PARSE_ERROR("virtio-options-input-packed", QEMU_CAPS_VIRTIO_MOUSE,
                         QEMU_CAPS_VIRTIO_KEYBOARD);
     DO_TEST_PARSE_ERROR("virtio-options-memballoon-packed", NONE);
+    DO_TEST_PARSE_ERROR("virtio-options-memballoon-freepage-reporting", NONE);
     DO_TEST_PARSE_ERROR("virtio-options-net-packed", NONE);
     DO_TEST_PARSE_ERROR("virtio-options-rng-packed", QEMU_CAPS_DEVICE_VIRTIO_RNG,
                         QEMU_CAPS_OBJECT_RNG_RANDOM);
@@ -3291,6 +3376,7 @@ mymain(void)
     DO_TEST_CAPS_ARCH_LATEST("vhost-vsock-ccw-auto", "s390x");
 
     DO_TEST_CAPS_VER("launch-security-sev", "2.12.0");
+    DO_TEST_CAPS_VER("launch-security-sev-missing-platform-info", "2.12.0");
 
     DO_TEST_CAPS_LATEST("vhost-user-fs-fd-memory");
     DO_TEST_CAPS_LATEST("vhost-user-fs-hugepages");
@@ -3353,6 +3439,7 @@ mymain(void)
     DO_TEST_CAPS_ARCH_LATEST("x86_64-default-cpu-tcg-q35-4.2", "x86_64");
 
     DO_TEST_CAPS_LATEST("virtio-9p-multidevs");
+    DO_TEST_CAPS_LATEST("virtio-9p-createmode");
 
     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
         virFileDeleteTree(fakerootdir);
